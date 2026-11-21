@@ -1324,7 +1324,7 @@ function renderDelivery(body) {
       noteInput,
       btn(d.firstDeliveredAt ? '再记一次交付' : '记录首次交付', { icon: 'send', variant: 'primary', disabled: ro, onClick: deliver }),
       c.status === 'delivered' ? btn('重新打开', { icon: 'restore', disabled: ro, onClick: reopen }) : null,
-      btn('交付报告', { icon: 'printer', title: '可以打印，或在打印窗口里选“另存为 PDF”', onClick: async () => { await save.flush(); openReport(state.current); } })),
+      btn('交付报告（英文）', { icon: 'printer', title: '可以打印，或在打印窗口里选“另存为 PDF”', onClick: async () => { await save.flush(); openReport(state.current); } })),
     d.deliveries.length ? h('details', { class: 'internal' }, h('summary', null, `交付记录（${d.deliveries.length} 次）`),
       h('ul', null, d.deliveries.map((x) => h('li', null, `${x.date}${x.first ? '（首次）' : ''}${x.note ? ` · ${x.note}` : ''}`)))) : null,
     d.firstDeliveredAt ? h('details', { class: 'internal' }, h('summary', null, '更正售后起算日（只在当初记错时用）'),
@@ -1333,7 +1333,7 @@ function renderDelivery(body) {
   );
 
   const infoPanel = h('div', { class: 'panel' },
-    h('h3', null, '交付信息', h('span', { class: 'en' }, '会出现在交付报告里')),
+    h('h3', null, '交付信息', h('span', { class: 'en' }, '交付报告是英文的，下面这些栏请用英文写')),
     h('div', { class: 'toolbar' }, stateEl),
     h('div', { class: 'grid2' },
       field('siteName', '网站名称', { ph: c.name }),
@@ -1426,55 +1426,89 @@ function renderLog(c) {
 }
 
 // ---------- 交付报告 ----------
+// 交付报告是给客户看的英文版本。默认清单里的中文名称和状态换成英文；你自己填的文字原样显示。
+const ACCOUNT_NAME_EN = {
+  '域名（注册商账号）': 'Domain name (registrar account)',
+  '域名 DNS 管理权限': 'Domain DNS management access',
+  '代码仓库（例如 GitHub）': 'Code repository (e.g. GitHub)',
+  '代码仓库（GitHub）': 'Code repository (GitHub)',
+  '托管平台（例如 Vercel、Netlify）': 'Hosting platform (e.g. Vercel, Netlify)',
+  '托管平台（Vercel）': 'Hosting platform (Vercel)',
+  '询价表单收信（发信服务或表单服务）': 'Contact form email delivery (email or form service)',
+  'Google 商家资料': 'Google Business Profile',
+};
+const ACCOUNT_STATUS_EN = { '未开始': 'Not started', '客户在办': 'In progress (client)', '已就绪': 'Ready', '不需要': 'Not needed' };
+const OWNER_EN = { '客户': 'Client', '客户本人': 'Client', '我方': 'Our team', '我方协助': 'Our team (assisting)', '待定': 'To be decided' };
+
+function dateEn(ymd) {
+  if (!ymd) return '';
+  const d = new Date(`${ymd}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
 function openReport(c) {
   const d = c.delivery;
   const tr = (cells, tag = 'td') => h('tr', null, cells.map((x) => h(tag, null, x)));
   const platforms = (d.platforms || []).filter((p) => p.name);
-  const report = h('article', { class: 'report' },
-    h('h1', null, '网站交付报告'),
-    h('p', { class: 'muted' }, `${c.name} · 编号 ${c.id} · 生成于 ${fmtTime(new Date().toISOString())}`),
+  const notYet = (text) => h('span', { class: 'muted' }, text);
+  const now = new Date();
+  const generated = `${now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`;
+  const last = d.deliveries.length > 1 ? d.deliveries[d.deliveries.length - 1].date : null;
+  const report = h('article', { class: 'report', lang: 'en' },
+    h('h1', null, 'Website Delivery Report'),
+    h('p', { class: 'muted' }, `${d.siteName || c.name} · Ref. ${c.id} · Prepared ${generated}`),
 
-    h('h2', null, '网站'),
+    h('h2', null, 'Website'),
     h('dl', { class: 'kv' },
-      h('dt', null, '网站名称'), h('dd', null, d.siteName || c.name),
-      h('dt', null, '网址'), h('dd', null, c.liveUrl ? extLink(c.liveUrl) : '（还没填）'),
-      h('dt', null, '代码仓库'), h('dd', null, d.repoUrl ? extLink(d.repoUrl) : '（还没填）'),
-      h('dt', null, '首次交付日期'), h('dd', null, d.firstDeliveredAt || '（还没交付）'),
-      d.deliveries.length > 1 ? [h('dt', null, '最近一次交付'), h('dd', null, d.deliveries[d.deliveries.length - 1].date)] : null),
+      h('dt', null, 'Website name'), h('dd', null, d.siteName || c.name),
+      h('dt', null, 'Live address'), h('dd', null, c.liveUrl ? extLink(c.liveUrl) : notYet('Not set yet')),
+      h('dt', null, 'Code repository'), h('dd', null, d.repoUrl ? extLink(d.repoUrl) : notYet('Not set yet')),
+      h('dt', null, 'First delivered'), h('dd', null, d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : notYet('Not delivered yet')),
+      last ? [h('dt', null, 'Latest delivery'), h('dd', null, dateEn(last))] : null),
 
-    h('h2', null, '网站功能范围'),
-    d.scope ? h('div', { class: 'pre' }, d.scope) : h('p', { class: 'muted' }, '（还没填）'),
+    h('h2', null, 'What the website includes'),
+    d.scope ? h('div', { class: 'pre' }, d.scope) : h('p', null, notYet('Not filled in yet')),
 
-    h('h2', null, '客户账号清单'),
-    h('p', { class: 'small' }, '下面的账号都属于您，费用由您承担。本报告不包含任何密码。'),
+    h('h2', null, 'Your accounts'),
+    h('p', { class: 'small' }, 'These accounts belong to you, and any fees are paid by you. This report does not contain any passwords.'),
     h('table', null,
-      h('thead', null, tr(['账号或资料', '负责人', '状态'], 'th')),
-      h('tbody', null, c.accounts.filter((a) => a.status !== '不需要').map((a) => tr([a.name, a.owner, a.status])))),
+      h('thead', null, tr(['Account', 'Owner', 'Status'], 'th')),
+      h('tbody', null, c.accounts.filter((a) => a.status !== '不需要').map((a) => tr([
+        ACCOUNT_NAME_EN[a.name] || a.name,
+        OWNER_EN[a.owner] || a.owner,
+        ACCOUNT_STATUS_EN[a.status] || a.status,
+      ])))),
 
-    h('h2', null, '由您自行保管的事项'),
-    d.customerKeeps ? h('div', { class: 'pre' }, d.customerKeeps) : h('p', null, '所有账号的登录密码、验证码和密钥都由您本人保管，我们不保存。'),
+    h('h2', null, 'What you keep yourself'),
+    d.customerKeeps
+      ? h('div', { class: 'pre' }, d.customerKeeps)
+      : h('p', null, 'You keep all login passwords, verification codes and keys for these accounts. We do not store any of them.'),
 
-    h('h2', null, '使用的平台及费用'),
+    h('h2', null, 'Services and costs'),
     platforms.length
       ? h('table', null,
-        h('thead', null, tr(['平台', '用途', '费用'], 'th')),
+        h('thead', null, tr(['Service', 'Used for', 'Cost'], 'th')),
         h('tbody', null, platforms.map((p) => {
           const verified = p.sourceUrl && p.verifiedOn;
           return tr([p.name, p.purpose || '', verified
-            ? h('span', null, p.cost || '', h('br'), h('small', { class: 'muted' }, `核实于 ${p.verifiedOn}，来源：`, extLink(p.sourceUrl)))
-            : '请以服务商当前页面为准']);
+            ? h('span', null, p.cost || '', h('br'), h('small', { class: 'muted' }, `Checked ${dateEn(p.verifiedOn)}, source: `, extLink(p.sourceUrl)))
+            : 'Please check the provider’s current pricing page']);
         })))
-      : h('p', null, '平台价格和套餐会变，请以服务商当前页面为准。'),
+      : h('p', null, 'Prices and plans change over time. Please check each provider’s current pricing page.'),
 
-    h('h2', null, '售后和维护'),
+    h('h2', null, 'Support and maintenance'),
     h('dl', { class: 'kv' },
-      h('dt', null, '售后期限'), h('dd', null, d.firstDeliveredAt ? `${d.warrantyDays} 天，从 ${d.firstDeliveredAt} 起到 ${c.computed.warrantyEnd} 为止` : `${d.warrantyDays} 天，从首次交付日起算`),
-      h('dt', null, '后续维护方式'), h('dd', { class: 'pre' }, d.maintenanceMethod || '（还没填）')),
+      h('dt', null, 'Support period'),
+      h('dd', null, d.firstDeliveredAt
+        ? `${d.warrantyDays} days, from ${dateEn(d.firstDeliveredAt)} to ${dateEn(c.computed.warrantyEnd)}`
+        : `${d.warrantyDays} days, starting from the first delivery date`),
+      h('dt', null, 'How to get help'), h('dd', { class: 'pre' }, d.maintenanceMethod || notYet('Not filled in yet'))),
 
-    h('p', { class: 'foot' }, '本报告由建站助手生成。平台费用只列出注明了核实来源和日期的内容，其余请以服务商当前页面为准。'),
+    h('p', { class: 'foot' }, 'Costs are listed only when we have checked them against the provider’s pricing page, with the date shown. For anything else, please check the provider’s current pricing page.'),
   );
 
-  const overlay = h('div', { class: 'report-overlay', role: 'dialog', 'aria-label': '交付报告' },
+  const overlay = h('div', { class: 'report-overlay', role: 'dialog', 'aria-label': '交付报告（英文）' },
     h('div', { class: 'report-toolbar' },
       btn('打印 / 保存为 PDF', { icon: 'printer', variant: 'primary', onClick: () => window.print() }),
       btn('关闭', { icon: 'x', onClick: () => closeReport() })),
