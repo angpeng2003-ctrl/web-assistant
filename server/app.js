@@ -5,7 +5,7 @@ import { Store, HttpError } from './store.js';
 import { checkObject, isRealDate, URL_RE } from './validate.js';
 import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES } from './docs.js';
 import { resolveFolder, planFiles, writeFiles, listDirs, createProjectFolder, resolveDeletableFolder } from './workspace.js';
-import { checkRepo, moveToRecycleBin, removeRegenerable } from './git.js';
+import { checkRepo, moveToRecycleBin, removeRegenerable, cloneRepo } from './git.js';
 
 const BODY_LIMIT = 1024 * 1024;
 
@@ -373,6 +373,33 @@ export function createApp(config, hooks = {}) {
       r.workspace.lastCheck = { ...check, folder };
     }, { log: `检查 GitHub 上传：${check.ok ? '全部通过' : `${check.issues.length} 个问题`}`, allowInactive: true });
     return { check, record: full(updated) };
+  });
+
+  // 下载继续修改：把 GitHub 上的代码取到一个新的本地文件夹，并关联为项目文件夹
+  route('POST', `/api/clients/${ID}/repo/clone`, async ({ m, body }) => {
+    const b = checkObject(body, {
+      parent: { type: 'string', max: 1000, allowSecret: true },
+      name: { type: 'string', max: 80 },
+      url: { type: 'string', max: 500 },
+    }, '下载继续修改');
+    const rec = await store.read(m[1]);
+    if (rec.trashedAt || rec.archivedAt) throw new HttpError(409, '归档或回收站里的客户不能做这个操作，先恢复。');
+    if (wsOf(rec).folder) throw new HttpError(409, '已经关联了本地项目文件夹，不用再下载。要换文件夹先在“工作环境”里点“换一个文件夹”。');
+    const folder = await createProjectFolder(b.parent, b.name, config.workspaceRoots, excludes);
+    let got;
+    try {
+      got = await cloneRepo(b.url, folder, { allowAnyRemote: !!hooks.allowAnyRemote });
+    } catch (e) {
+      // 下载失败：把刚建的空文件夹收回（git 可能已经删掉了它；里面有东西就不动）
+      await fs.rmdir(folder).catch(() => {});
+      throw e;
+    }
+    const now = new Date().toISOString();
+    const updated = await store.update(m[1], (r) => {
+      setFolder(r, folder);
+      r.workspace.restored = { at: now, folder, remote: got.remote, head: got.head, branch: got.branch };
+    }, { log: `从 GitHub 下载到本地继续修改：${path.basename(folder)}（提交 ${got.head}）` });
+    return { folder, ...got, record: full(updated) };
   });
 
   route('POST', `/api/clients/${ID}/repo/remove`, async ({ m, body }) => {

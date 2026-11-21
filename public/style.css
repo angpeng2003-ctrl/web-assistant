@@ -425,3 +425,7 @@ input.mono { font-family: var(--mono); font-size: 14px; }
   .env-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .env-row.head { display: none; }
 }
+
+/* 下载继续修改 */
+.clone-box { border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 14px 16px; margin-top: 12px; background: var(--surface-2); }
+.clone-box h3 { font-size: 15px; }

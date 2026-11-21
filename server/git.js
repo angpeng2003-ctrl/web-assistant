@@ -172,6 +172,28 @@ export async function checkRepo(folder) {
   return done();
 }
 
+/**
+ * 从远程仓库下载代码到一个刚建好的空文件夹（继续修改用）。
+ * 只把代码取到本地，不改远程仓库。地址只接受 https（测试可放开）。
+ */
+export async function cloneRepo(url, target, { allowAnyRemote = false } = {}) {
+  const u = String(url || '').trim();
+  if (!allowAnyRemote && !/^https:\/\/[^\s]+$/i.test(u)) {
+    throw new HttpError(400, '仓库地址要以 https:// 开头，例如 https://github.com/店的账号/仓库名');
+  }
+  const r = await runGit(path.dirname(target), ['clone', '--quiet', '--', u, target], { timeout: 10 * 60 * 1000 });
+  if (r.missing) throw new HttpError(500, '这台电脑上找不到 git 命令，请先安装 Git。');
+  if (r.code !== 0) {
+    const msg = firstLine(r.stderr) || '未知错误';
+    const hint = /authentication|could not read username|403|not found|repository .* not found/i.test(r.stderr)
+      ? '（可能是仓库地址不对，或者这台电脑还没登录能访问这个仓库的 GitHub 账号）' : '';
+    throw new HttpError(502, `下载失败：${msg}${hint}`);
+  }
+  const head = await runGit(target, ['rev-parse', '--short', 'HEAD']);
+  const br = await runGit(target, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return { head: head.stdout.trim(), branch: br.stdout.trim(), remote: cleanRemote(u) };
+}
+
 /** 默认的删除方式：移到 Windows 回收站（可以找回） */
 export function moveToRecycleBin(target) {
   return new Promise((resolve, reject) => {

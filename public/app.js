@@ -512,11 +512,11 @@ function stepInfo(c) {
     },
     accounts: { sub: c.env.domain ? `${c.env.domain} · 已填 ${filled}/${core.length}` : `已填 ${filled}/${core.length}`, done: filled === core.length },
     workspace: {
-      sub: ws.removed ? '本地文件夹已清理' : ws.folder ? ws.folder.split(/[\\/]/).pop() : '还没建文件夹',
-      done: !!(ws.removed || (ws.folder && ws.lastWrite)),
+      sub: ws.folder ? ws.folder.split(/[\\/]/).pop() : ws.removed ? '本地文件夹已清理' : '还没建文件夹',
+      done: !!(ws.folder ? (ws.lastWrite || ws.restored) : ws.removed),
     },
     delivery: {
-      sub: ws.removed ? `已交付 · 本地已清理` : c.delivery.firstDeliveredAt ? `首次交付 ${c.delivery.firstDeliveredAt}` : '还没交付',
+      sub: ws.removed && !ws.folder ? `已交付 · 本地已清理` : c.delivery.firstDeliveredAt ? `首次交付 ${c.delivery.firstDeliveredAt}` : '还没交付',
       done: !!c.delivery.firstDeliveredAt,
     },
   };
@@ -986,6 +986,45 @@ function renderRulesTemplate(ro) {
   return box;
 }
 
+// ---------- 第 4 步里的：下载继续修改 ----------
+// 本地没有项目文件夹时（例如交付后清理掉了），从 GitHub 把代码下载到一个新文件夹，接着改
+function renderCloneForm(c, ro) {
+  const ws = c.workspace;
+  const roots = state.config.workspaceRoots;
+  const removedName = ws.removed && ws.removed.folder ? ws.removed.folder.split(/[\\/]/).pop() : '';
+  const defaultUrl = (c.env.repo || c.delivery.repoUrl || (ws.removed && ws.removed.remote) || '').replace(/\.git$/, '');
+  const parentSel = h('select', { id: 'clone-parent', disabled: ro }, roots.map((r) => h('option', { value: r }, r)));
+  const nameInput = h('input', { id: 'clone-name', type: 'text', maxlength: 80, value: removedName || safeFolderName(c.name), disabled: ro, autocomplete: 'off' });
+  const urlInput = h('input', { id: 'clone-url', type: 'text', maxlength: 500, value: defaultUrl, placeholder: 'https://github.com/店的账号/仓库名', disabled: ro, autocomplete: 'off', spellcheck: 'false', class: 'mono' });
+  const go = btn('下载，继续修改', { icon: 'download', variant: 'primary', disabled: ro });
+  go.addEventListener('click', async () => {
+    if (!/^https:\/\/\S+$/i.test(urlInput.value.trim())) {
+      urlInput.focus();
+      return toast('仓库地址要以 https:// 开头', 'error');
+    }
+    go.disabled = true;
+    fill(go, icon('loader', 'spin'), '正在下载…');
+    try {
+      const r = await api('POST', `/api/clients/${c.id}/repo/clone`, { parent: parentSel.value, name: nameInput.value.trim(), url: urlInput.value.trim() });
+      setCurrent(r.record);
+      toast(`已下载到 ${r.folder}（提交 ${r.head}），可以接着改了`, 'ok');
+      renderMain();
+    } catch (e) {
+      toast(e.message, 'error');
+      go.disabled = false;
+      fill(go, icon('download'), '下载，继续修改');
+    }
+  });
+  return h('div', { class: 'clone-box' },
+    h('h3', null, '下载继续修改', h('span', { class: 'en' }, '从 GitHub 把最新代码下载到本地一个新文件夹，之后用 Claude Code 打开接着改')),
+    h('div', { class: 'grid2' },
+      h('label', { class: 'f-label full', for: 'clone-url' }, h('span', null, '仓库地址'), urlInput),
+      h('label', { class: 'f-label', for: 'clone-parent' }, h('span', null, '下载到哪里'), parentSel),
+      h('label', { class: 'f-label', for: 'clone-name' }, h('span', null, '文件夹名'), nameInput)),
+    h('p', { class: 'small muted', style: 'margin:8px 0 10px' }, '只下载代码，不改 GitHub 上的东西。只在本地的文件（.env.local、_原素材/ 等）不在 GitHub 上，需要的话另外放回去。'),
+    go);
+}
+
 // ---------- 第 4 步里的：上传检查和清理本地文件夹 ----------
 function renderRepoPanel(c, ro) {
   const ws = c.workspace;
@@ -996,8 +1035,9 @@ function renderRepoPanel(c, ro) {
         h('p', null, `本地文件夹已于 ${fmtTime(ws.removed.at)} 移到回收站（提交 ${ws.removed.head}）。`),
         h('p', { class: 'small' }, '代码在：', ws.removed.remote ? extLink(ws.removed.remote) : '（没记下远程地址）')));
     } else {
-      panel.append(h('p', { class: 'muted' }, '还没有关联项目文件夹。先在“工作环境”里建一个或选一个。'));
+      panel.append(h('p', { class: 'muted' }, '还没有关联项目文件夹。先在“工作环境”里建一个或选一个；代码已经在 GitHub 上的，也可以直接下载。'));
     }
+    panel.append(renderCloneForm(c, ro));
     return panel;
   }
 

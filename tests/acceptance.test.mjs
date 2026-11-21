@@ -451,3 +451,54 @@ test('12. 账号与准备：域名和固定账号清单只记账号名；填了�
     await s.close();
   }
 });
+
+test('13. 下载继续修改：本地清理后从远程仓库下载到新文件夹，不覆盖已有文件夹', async () => {
+  const root = await tempDir('jz-root-');
+  const trash = await fakeTrashHooks();
+  const s = await startServer({ roots: [root], hooks: { ...trash.hooks, allowAnyRemote: true } });
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '回来改店' })).data;
+    const repo = await makePushedRepo(root, 'back-site');
+    const origin = g(repo, 'remote', 'get-url', 'origin').trim();
+    await s.call('POST', `/api/clients/${id}/workspace/plan`, { folder: repo });
+    // 已经有本地文件夹：不用下载
+    assert.equal((await s.call('POST', `/api/clients/${id}/repo/clone`, { parent: root, name: 'x', url: origin })).status, 409);
+    await s.call('POST', `/api/clients/${id}/delivery/deliver`, { date: '2026-11-20' });
+    const rm = await s.call('POST', `/api/clients/${id}/repo/remove`, { confirmName: 'back-site' });
+    assert.equal(rm.status, 200, JSON.stringify(rm.data));
+    // 同名文件夹已存在：不覆盖
+    await fs.mkdir(path.join(root, '占位'));
+    assert.equal((await s.call('POST', `/api/clients/${id}/repo/clone`, { parent: root, name: '占位', url: origin })).status, 409);
+    // 下载失败：不留下空文件夹
+    const bad = await s.call('POST', `/api/clients/${id}/repo/clone`, { parent: root, name: 'bad', url: path.join(root, 'no-such-repo.git') });
+    assert.equal(bad.status, 502);
+    assert.equal(await exists(path.join(root, 'bad')), false);
+    // 正常下载
+    const r = await s.call('POST', `/api/clients/${id}/repo/clone`, { parent: root, name: 'back-site-2', url: origin });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    // Windows 上 git 可能把换行转成 CRLF，只比内容
+    assert.equal((await fs.readFile(path.join(root, 'back-site-2', 'index.html'), 'utf8')).trim(), '<h1>hi</h1>');
+    assert.equal(r.data.record.workspace.folder, path.join(root, 'back-site-2'));
+    assert.ok(r.data.head);
+    // 下载下来的就是干净、已同步的仓库
+    const c = (await s.call('POST', `/api/clients/${id}/repo/check`)).data.check;
+    assert.equal(c.ok, true, c.issues.join('|'));
+  } finally {
+    await s.close();
+  }
+});
+
+test('13b. 下载继续修改：正式运行时只接受 https 地址', async () => {
+  const root = await tempDir('jz-root-');
+  const s = await startServer({ roots: [root] });
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '地址店' })).data;
+    for (const url of ['git@github.com:a/b.git', 'file:///C:/x', '--upload-pack=evil', 'http://github.com/a/b']) {
+      const r = await s.call('POST', `/api/clients/${id}/repo/clone`, { parent: root, name: 'x', url });
+      assert.equal(r.status, 400, url);
+      assert.equal(await exists(path.join(root, 'x')), false, url);
+    }
+  } finally {
+    await s.close();
+  }
+});
