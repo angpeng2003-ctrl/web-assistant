@@ -340,6 +340,8 @@ dialog.dlg .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; ma
 .report table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .report th, .report td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
 .report a { color: #0f766e; }
+.report .login { font-family: var(--mono); word-break: break-all; }
+.report .accounts-table td:nth-child(3), .report .accounts-table td:nth-child(4) { white-space: nowrap; }
 .report .foot { margin-top: 28px; font-size: 13px; color: #555; }
 
 /* ---------- 客户模式 ---------- */

@@ -413,3 +413,23 @@ test('11. 服务端安全边界：只认本机来源、拒绝未知字段、限�
     await s.close();
   }
 });
+
+test('12. 账号清单可以记账号名（用户名或登录邮箱），不能记密码', async () => {
+  const s = await startServer();
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '账号店' })).data;
+    const fresh = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.ok(fresh.accounts.every((a) => a.login === ''));
+    const accounts = [
+      { id: 'a1', name: '代码仓库（GitHub）', login: 'shop-owner', owner: '客户', status: '已就绪', note: '', todo: '' },
+      { id: 'a2', name: '托管平台（Vercel）', owner: '客户', status: '未开始', note: '', todo: '' }, // 旧数据没有 login 也能存
+    ];
+    const rec = (await s.call('PUT', `/api/clients/${id}/accounts`, { accounts })).data;
+    assert.equal(rec.accounts[0].login, 'shop-owner');
+    assert.equal(rec.accounts[1].login, undefined);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ ...accounts[0], login: 'password: Abc12345!' }] })).status, 422);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ ...accounts[0], login: 'x'.repeat(201) }] })).status, 400);
+  } finally {
+    await s.close();
+  }
+});

@@ -1086,7 +1086,7 @@ function renderAccounts(body) {
 
   const save = debounce(async () => {
     for (const r of rows) {
-      for (const k of ['name', 'owner', 'note', 'todo']) {
+      for (const k of ['name', 'login', 'owner', 'note', 'todo']) {
         const s = detectSecret(r[k]);
         if (s) {
           stateEl.textContent = `“${r.name || '未命名'}”里有疑似${s.kind}，没有保存。请删掉。`;
@@ -1114,7 +1114,7 @@ function renderAccounts(body) {
   function draw() {
     list.replaceChildren(...rows.map((r, i) => {
       const inp = (k, label, cls, ph) => {
-        const el = h('input', { type: 'text', value: r[k] || '', maxlength: k === 'name' || k === 'owner' ? 100 : 500, disabled: ro, placeholder: ph || '' });
+        const el = h('input', { type: 'text', value: r[k] || '', maxlength: k === 'name' || k === 'owner' ? 100 : k === 'login' ? 200 : 500, disabled: ro, placeholder: ph || '', autocomplete: 'off' });
         el.addEventListener('input', () => { r[k] = el.value; save(); });
         el.addEventListener('blur', () => save.flush());
         return h('label', { class: `f ${cls || ''}` }, h('span', null, label), el);
@@ -1123,10 +1123,11 @@ function renderAccounts(body) {
       sel.addEventListener('change', () => { r.status = sel.value; save.flush(); });
       return h('div', { class: 'row-card' },
         inp('name', '账号或资料', 'w2'),
-        inp('owner', '负责人', '', '例如：客户本人'),
+        inp('login', '账号名（用户名或登录邮箱）', 'w2', '例如 GitHub 用户名、注册用的邮箱；不要写密码'),
+        inp('owner', '负责人', '', '例如：客户'),
         h('label', { class: 'f' }, h('span', null, '状态'), sel),
-        inp('todo', '待办', 'w2', '例如：请客户注册后把协作权限给我们'),
-        inp('note', '备注（不要写密码）', 'w6', '只写非敏感信息，例如账号用的是哪个邮箱、在哪家注册'),
+        inp('todo', '待办', 'w3', '例如：请客户注册后把协作权限给我们'),
+        inp('note', '备注（不要写密码）', 'w3', '只写非敏感信息，例如在哪家注册'),
         h('div', { class: 'actions w6' }, btn('删掉这一项', { icon: 'trash', small: true, variant: 'danger', disabled: ro, onClick: () => removeRow(i) })));
     }));
   }
@@ -1148,7 +1149,7 @@ function renderAccounts(body) {
   }
 
   function addRow() {
-    rows.push({ id: `a${Date.now().toString(36)}`, name: '', owner: '客户', status: '未开始', note: '', todo: '' });
+    rows.push({ id: `a${Date.now().toString(36)}`, name: '', login: '', owner: '客户', status: '未开始', note: '', todo: '' });
     draw();
     const inputs = list.querySelectorAll('.row-card:last-child input');
     if (inputs[0]) inputs[0].focus();
@@ -1511,10 +1512,11 @@ function openReport(c) {
 
     h('h2', null, 'Your accounts'),
     h('p', { class: 'small' }, 'These accounts belong to you, and any fees are paid by you. This report does not contain any passwords.'),
-    h('table', null,
-      h('thead', null, tr(['Account', 'Owner', 'Status'], 'th')),
+    h('table', { class: 'accounts-table' },
+      h('thead', null, tr(['Service', 'Account', 'Owner', 'Status'], 'th')),
       h('tbody', null, c.accounts.filter((a) => a.status !== '不需要').map((a) => tr([
         ACCOUNT_NAME_EN[a.name] || a.name,
+        a.login ? h('span', { class: 'login' }, a.login) : h('span', { class: 'muted' }, 'Not set yet'),
         OWNER_EN[a.owner] || a.owner,
         ACCOUNT_STATUS_EN[a.status] || a.status,
       ])))),

@@ -14,12 +14,12 @@ export const MAINT_CATEGORIES = ['缺陷修复', '新需求', '账号或密码�
 export const MAINT_STATUSES = ['待处理', '处理中', '已完成', '不处理'];
 
 export const DEFAULT_ACCOUNTS = [
-  { name: '域名（注册商账号）', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '域名 DNS 管理权限', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '代码仓库（例如 GitHub）', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '托管平台（例如 Vercel、Netlify）', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '询价表单收信（发信服务或表单服务）', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: 'Google 商家资料', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: '域名（注册商账号）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: '域名 DNS 管理权限', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: '代码仓库（例如 GitHub）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: '托管平台（例如 Vercel、Netlify）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: '询价表单收信（发信服务或表单服务）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
+  { name: 'Google 商家资料', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
 ];
 
 const INFO_FIELDS = {
@@ -273,6 +273,7 @@ export function createApp(config, hooks = {}) {
         items: {
           id: { type: 'string', max: 20, pattern: /^[A-Za-z0-9]+$/ },
           name: { type: 'string', max: 100 },
+          login: { type: 'string', max: 200, optional: true },
           owner: { type: 'string', max: 100 },
           status: { type: 'string', enum: ACCOUNT_STATUSES },
           note: { type: 'string', max: 500 },
