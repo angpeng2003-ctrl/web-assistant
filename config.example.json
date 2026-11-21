@@ -1,0 +1,5 @@
+{
+  "port": 4520,
+  "dataDir": "data",
+  "workspaceRoots": [".."]
+}

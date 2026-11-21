@@ -1,0 +1,10 @@
+# 客户数据和本机配置，永远不提交
+data/
+demo-data/
+config.json
+node_modules/
+*.tmp
+# 带客户名的内部文档只留在本机（仓库是公开的）
+docs/SESSION_HANDOFF.md
+docs/路线图.html
+docs/handoff-archive/
