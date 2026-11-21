@@ -1,4 +1,4 @@
-// 工作环境里写的文件：建站规则（CLAUDE.md）和网站提纲（docs/网站提纲.md）。
+// 工作环境里写的文件：建站规则（CLAUDE.md）。
 // 规则模板所有客户共用，存在 data/rules-template.md，可以在界面里改。
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { atomicWrite } from './store.js';
 
 export const DEFAULT_RULES = `# {{店名}} · 建站规则
 
-客户编号：{{编号}}。先读 docs/网站提纲.md（要做什么），以提纲为准，提纲以外的不做。提纲没写清楚的，停下来问负责人。
+客户编号：{{编号}}。要做什么以负责人给的资料（和客户聊天的录音转文字、截图等）和对话里的说明为准，没说要做的不做；不清楚的停下来问负责人。
 
 ## 设计
 
@@ -57,11 +57,8 @@ function fillTemplate(tpl, rec) {
 /** 返回 [{ key, rel, title, content }]，内容都经过密钥清理 */
 export async function workspaceDocs(rec, dataDir) {
   const { text } = await readRulesTemplate(dataDir);
-  const outline = (rec.outline && rec.outline.text ? rec.outline.text : '').trim();
-  const outlineDoc = `# ${rec.name} · 网站提纲\n\n客户编号：${rec.id}。这份提纲来自建站助手；要改请回建站助手改，再重新写入。\n\n${outline || '（还没写提纲）'}\n`;
   const list = [
     { key: 'rules', rel: 'CLAUDE.md', title: '建站规则', content: fillTemplate(text, rec) },
-    { key: 'outline', rel: 'docs/网站提纲.md', title: '网站提纲', content: outlineDoc },
   ];
   return list.map((d) => ({ ...d, content: redactSecrets(d.content.endsWith('\n') ? d.content : `${d.content}\n`) }));
 }

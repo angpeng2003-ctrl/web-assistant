@@ -1,4 +1,4 @@
-// 验收测试：台账、客户信息和提纲、账号清单、工作环境（建文件夹写规则）、交付、上传检查和清理本地文件夹
+// 验收测试：台账、客户信息、账号清单、工作环境（建文件夹写规则）、交付、上传检查和清理本地文件夹
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -66,18 +66,18 @@ test('1. 可新建多个客户，编号唯一，记录互相隔离', async () =>
   }
 });
 
-test('2. 客户信息和网站提纲自动保存，重启后仍能读取', async () => {
+test('2. 客户信息自动保存，重启后仍能读取；提纲接口已去掉', async () => {
   const dataDir = await tempDir();
   let s = await startServer({ dataDir });
   const { id } = (await s.call('POST', '/api/clients', { name: '丙店' })).data;
   await s.call('PUT', `/api/clients/${id}/info`, { contact: '张三', phone: '(626) 555-0100', address: '1 Main St', email: 'a@b.com', fee: '建站 1500 美元，已付一半' });
-  await s.call('PUT', `/api/clients/${id}/outline`, { text: '## 页面\n- 首页\n- 联系' });
   await s.close();
   s = await startServer({ dataDir });
   try {
     const rec = (await s.call('GET', `/api/clients/${id}`)).data;
     assert.deepEqual(rec.info, { contact: '张三', phone: '(626) 555-0100', address: '1 Main St', email: 'a@b.com', fee: '建站 1500 美元，已付一半' });
-    assert.equal(rec.outline.text, '## 页面\n- 首页\n- 联系');
+    assert.equal(rec.outline, undefined);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/outline`, { text: 'x' })).status, 404);
     // 只改一项不会清掉别的
     await s.call('PUT', `/api/clients/${id}/info`, { phone: '999' });
     const rec2 = (await s.call('GET', `/api/clients/${id}`)).data;
@@ -88,12 +88,11 @@ test('2. 客户信息和网站提纲自动保存，重启后仍能读取', async
   }
 });
 
-test('3. 新建项目文件夹：写入建站规则（要求用 UI UX Pro Max）和网站提纲，不覆盖已有文件夹', async () => {
+test('3. 新建项目文件夹：只写入建站规则（要求用 UI UX Pro Max），不覆盖已有文件夹', async () => {
   const root = await tempDir('jz-root-');
   const s = await startServer({ roots: [root] });
   try {
     const { id } = (await s.call('POST', '/api/clients', { name: '绿叶餐厅' })).data;
-    await s.call('PUT', `/api/clients/${id}/outline`, { text: '## 页面\n- 首页：菜单和营业时间' });
     const r = await s.call('POST', `/api/clients/${id}/workspace/create`, { parent: root, name: '绿叶餐厅' });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     const folder = path.join(root, '绿叶餐厅');
@@ -101,8 +100,8 @@ test('3. 新建项目文件夹：写入建站规则（要求用 UI UX Pro Max）
     assert.match(rules, /绿叶餐厅 · 建站规则/);
     assert.match(rules, /UI UX Pro Max/);
     assert.match(rules, new RegExp(id));
-    const outline = await fs.readFile(path.join(folder, 'docs', '网站提纲.md'), 'utf8');
-    assert.match(outline, /菜单和营业时间/);
+    assert.doesNotMatch(rules, /提纲/);
+    assert.deepEqual(await fs.readdir(folder), ['CLAUDE.md']);
     assert.equal(r.data.record.workspace.folder, folder);
     // 同名文件夹已存在：不覆盖
     assert.equal((await s.call('POST', `/api/clients/${id}/workspace/create`, { parent: root, name: '绿叶餐厅' })).status, 409);
@@ -144,13 +143,13 @@ test('4. 已有文件夹写规则：不覆盖不同内容，可另存或覆盖�
     await fs.writeFile(path.join(proj, 'index.html'), '<p>已有文件</p>', 'utf8');
     const plan = (await s.call('POST', `/api/clients/${id}/workspace/plan`, { folder: proj })).data;
     const st = Object.fromEntries(plan.files.map((f) => [f.key, f.status]));
-    assert.deepEqual(st, { rules: 'conflict', outline: 'new' });
+    assert.deepEqual(st, { rules: 'conflict' });
     const expected = { rules: plan.files.find((f) => f.key === 'rules').existingHash };
 
-    let w = (await s.call('POST', `/api/clients/${id}/workspace/write`, { folder: proj, choices: { rules: 'write', outline: 'write' }, expected })).data;
+    let w = (await s.call('POST', `/api/clients/${id}/workspace/write`, { folder: proj, choices: { rules: 'write' }, expected })).data;
     assert.equal(w.results.find((x) => x.rel === 'CLAUDE.md').outcome, 'conflict');
     assert.equal(await fs.readFile(path.join(proj, 'CLAUDE.md'), 'utf8'), '客户自己的旧规则');
-    assert.ok(await exists(path.join(proj, 'docs', '网站提纲.md')));
+    assert.equal(await exists(path.join(proj, 'docs')), false);
 
     w = (await s.call('POST', `/api/clients/${id}/workspace/write`, { folder: proj, choices: { rules: 'newVersion' }, expected })).data;
     assert.equal(w.results[0].outcome, 'savedAs');
@@ -370,7 +369,7 @@ test('10. 疑似密码或密钥不会被保存，也不会写进项目文件', a
     ];
     for (const v of samples) {
       assert.equal((await s.call('PUT', `/api/clients/${id}/info`, { fee: v })).status, 422, v);
-      assert.equal((await s.call('PUT', `/api/clients/${id}/outline`, { text: `## 页面\n${v}` })).status, 422, v);
+      assert.equal((await s.call('PUT', `/api/clients/${id}/info`, { address: `1 Main St ${v}` })).status, 422, v);
     }
     assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ id: 'a1', name: 'GitHub', owner: '客户', status: '未开始', note: '密码：Abc12345', todo: '' }] })).status, 422);
     assert.equal((await s.call('POST', `/api/clients/${id}/maintenance`, { date: '2026-11-10', category: '账号或密码相关协助', title: '重置密码', detail: '新密码是 Xyz98765!' })).status, 422);

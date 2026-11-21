@@ -506,8 +506,8 @@ function stepInfo(c) {
   const infoFilled = ['contact', 'phone', 'email', 'address'].filter((k) => c.info[k]).length;
   return {
     info: {
-      sub: `${c.info.contact || '负责人未填'}${c.outline.text.trim() ? ' · 有提纲' : ' · 还没提纲'}`,
-      done: infoFilled >= 2 && !!c.outline.text.trim(),
+      sub: [c.info.contact || '负责人未填', c.info.phone].filter(Boolean).join(' · '),
+      done: infoFilled >= 2,
     },
     accounts: { sub: `${ready}/${c.accounts.length} 项就绪`, done: c.accounts.length > 0 && ready === c.accounts.length },
     workspace: {
@@ -529,9 +529,9 @@ function renderMain() {
       h('h2', null, '建站助手'),
       h('p', null, '帮你和小商家客户一起梳理建站需求、整理给开发者的建站说明、准备项目文档，并记录交付和维护。'),
       h('ul', null,
-        h('li', null, '客户信息：名字、负责人、电话、地址、邮箱、费用，加一份网站提纲'),
+        h('li', null, '客户信息：名字、负责人、电话、地址、邮箱、费用'),
         h('li', null, '账号与准备：域名、仓库、托管等账号的准备情况'),
-        h('li', null, '工作环境：一键建项目文件夹，写好建站规则和提纲'),
+        h('li', null, '工作环境：一键建项目文件夹，写好建站规则'),
         h('li', null, '交付与维护：记录交付，检查代码都传到 GitHub 后清理本地文件夹')),
       h('div', { class: 'toolbar' },
         btn('新建客户', { icon: 'plus', variant: 'primary', onClick: () => document.getElementById('new-client-name').focus() }),
@@ -652,27 +652,7 @@ function renderStep(body) {
   if (state.step === 'delivery') return renderDelivery(body);
 }
 
-// ---------- 第 1 步：客户信息和网站提纲 ----------
-const OUTLINE_TEMPLATE = `## 网站目标
--
-
-## 页面
-- 首页：
--
-
-## 功能
--
-
-## 设计风格和参考网站
--
-
-## 素材在哪里
--
-
-## 待客户确认
--
-`;
-
+// ---------- 第 1 步：客户信息 ----------
 function renderInfo(body) {
   const c = state.current;
   const ro = inactive();
@@ -734,44 +714,6 @@ function renderInfo(body) {
     }
   });
 
-  // 网站提纲
-  const outline = h('textarea', { id: 'outline', class: 'outline-editor', rows: 18, maxlength: 50000, disabled: ro, spellcheck: 'false', placeholder: '把录音转文字和截图交给 Claude 整理好之后，贴在这里。' });
-  outline.value = c.outline.text || '';
-  const outlineState = h('span', { class: 'save-state', role: 'status' }, c.outline.updatedAt ? `已保存 ${fmtTime(c.outline.updatedAt)}` : '改动会自动保存');
-  const outlineKey = `${c.id}:outline`;
-  const saveOutline = debounce(async () => {
-    const bad = detectSecret(outline.value);
-    if (bad) {
-      outlineState.textContent = `提纲里有疑似${bad.kind}，没有保存。请删掉。`;
-      outlineState.classList.add('error');
-      markUnsaved(outlineKey, `网站提纲：疑似${bad.kind}，没有保存`);
-      return;
-    }
-    beginSave();
-    outlineState.textContent = '正在保存…';
-    try {
-      setCurrent(await api('PUT', `/api/clients/${c.id}/outline`, { text: outline.value }));
-      outlineState.textContent = `已保存 ${hhmm(new Date())}`;
-      outlineState.classList.remove('error');
-      endSave(outlineKey);
-    } catch (e) {
-      outlineState.textContent = e.message;
-      outlineState.classList.add('error');
-      endSave(outlineKey, `网站提纲：${e.message}`);
-    }
-  }, 900);
-  outline.addEventListener('input', () => saveOutline());
-  outline.addEventListener('blur', () => saveOutline.flush());
-  const tplBtn = btn('插入提纲模板', {
-    icon: 'file', variant: 'ghost', disabled: ro,
-    onClick: () => {
-      if (outline.value.trim()) return toast('提纲里已经有内容了，模板只在空的时候插入', 'error');
-      outline.value = OUTLINE_TEMPLATE;
-      saveOutline.flush();
-      outline.focus();
-    },
-  });
-
   body.replaceChildren(
     h('div', { class: 'panel' },
       h('h3', null, '客户基本信息', h('span', { class: 'en' }, '台账用，不写进网站文件')),
@@ -784,11 +726,6 @@ function renderInfo(body) {
         field('fee', '费用', { full: true, multiline: true, max: 500, ph: '例如：建站 1500 美元，已付一半；域名每年约 20 美元由客户付' })),
       h('div', { class: 'toolbar', style: 'margin:12px 0 0' }, infoState),
       h('p', { class: 'muted small', style: 'margin:6px 0 0' }, '不要在这里记密码、令牌或密钥。')),
-    h('div', { class: 'panel' },
-      h('h3', null, '网站提纲', h('span', { class: 'en' }, '建项目文件夹时写成 docs/网站提纲.md')),
-      h('p', { class: 'muted small', style: 'margin-top:-4px' }, '要做哪些页面、功能、风格、素材在哪、还要客户确认什么。录音转文字和截图交给 Claude 整理后贴进来就行。'),
-      outline,
-      h('div', { class: 'toolbar', style: 'margin:10px 0 0' }, tplBtn, outlineState)),
   );
 }
 
@@ -827,7 +764,7 @@ function renderWorkspace(body) {
   const planBox = h('div');
   const resultBox = h('div');
 
-  // 写入规则和提纲：先列现状，再按选择写
+  // 写入建站规则：先列现状，再按选择写
   async function plan(folder) {
     resultBox.replaceChildren();
     try {
@@ -887,7 +824,7 @@ function renderWorkspace(body) {
         setCurrent(out.record);
         planBox.replaceChildren();
         const bad = out.results.filter((x) => ['failed', 'conflict'].includes(x.outcome)).length;
-        toast(bad ? `完成，但有 ${bad} 个文件没写入` : '规则和提纲已写好', bad ? 'error' : 'ok');
+        toast(bad ? '规则文件没写入，见上面的说明' : '建站规则已写好', bad ? 'error' : 'ok');
         renderMain();
       } catch (e) {
         toast(e.message, 'error');
@@ -936,7 +873,7 @@ function renderWorkspace(body) {
 
   const parts = [
     notice('', 'info',
-      h('p', null, '一键建好项目文件夹，写入两份文件：', h('strong', null, 'CLAUDE.md'), '（建站规则，要求先用 UI UX Pro Max 定设计）和 ', h('strong', null, 'docs/网站提纲.md'), '（第 1 步写的提纲）。'),
+      h('p', null, '一键建好项目文件夹，写入 ', h('strong', null, 'CLAUDE.md'), '（建站规则，要求先用 UI UX Pro Max 定设计）。'),
       h('p', null, '之后用 Claude Code 打开这个文件夹开工。建站助手不运行网站代码、不安装依赖、不提交也不推送代码。')),
   ];
 
@@ -954,9 +891,9 @@ function renderWorkspace(body) {
     parts.push(h('div', { class: 'panel' },
       h('h3', null, '项目文件夹'),
       h('p', { class: 'path', style: 'margin:0 0 12px' }, ws.folder),
-      last ? h('div', { class: 'small muted' }, `上次写入 ${fmtTime(last.at)}`, resultList(last.results)) : h('p', { class: 'muted small' }, '还没往这个文件夹写过规则和提纲。'),
+      last ? h('div', { class: 'small muted' }, `上次写入 ${fmtTime(last.at)}`, resultList(last.results)) : h('p', { class: 'muted small' }, '还没往这个文件夹写过建站规则。'),
       h('div', { class: 'toolbar', style: 'margin:12px 0 0' },
-        btn('重新写入规则和提纲', { icon: 'refresh', variant: 'primary', disabled: ro, onClick: () => plan(ws.folder) }),
+        btn('重新写入建站规则', { icon: 'refresh', variant: 'primary', disabled: ro, onClick: () => plan(ws.folder) }),
         btn('换一个文件夹', {
           icon: 'folder', disabled: ro,
           onClick: async () => {
@@ -978,7 +915,7 @@ function renderWorkspace(body) {
       try {
         const r = await api('POST', `/api/clients/${c.id}/workspace/create`, { parent: parentSel.value, name: nameInput.value.trim() });
         setCurrent(r.record);
-        toast(`已建好 ${r.folder}，规则和提纲已写入`, 'ok');
+        toast(`已建好 ${r.folder}，建站规则已写入`, 'ok');
         renderMain();
       } catch (e) {
         toast(e.message, 'error');
@@ -991,14 +928,14 @@ function renderWorkspace(body) {
       h('div', { class: 'grid2' },
         h('label', { class: 'f-label', for: 'ws-parent' }, h('span', null, '建在哪里'), parentSel),
         h('label', { class: 'f-label', for: 'ws-name' }, h('span', null, '文件夹名'), nameInput)),
-      h('ul', { class: 'file-list', 'aria-label': '会写入的文件' }, ['CLAUDE.md（建站规则）', 'docs/网站提纲.md'].map((f) => h('li', null, icon('file'), f))),
+      h('ul', { class: 'file-list', 'aria-label': '会写入的文件' }, h('li', null, icon('file'), 'CLAUDE.md（建站规则）')),
       btn('建立文件夹并写入规则', { icon: 'plus', variant: 'primary', disabled: ro, onClick: create })),
     h('details', { class: 'panel' },
       h('summary', null, '用已有的文件夹'),
       h('div', { style: 'margin-top:12px' },
         h('label', { class: 'f-label', for: 'ws-folder' }, h('span', null, '项目文件夹'), h('small', null, `只能选这个范围里的文件夹：${roots.join('；')}`)),
         picker.el,
-        h('div', { style: 'margin-top:10px' }, btn('检查并写入规则和提纲', { icon: 'search', disabled: ro, onClick: () => plan(picker.input.value.trim()) })))));
+        h('div', { style: 'margin-top:10px' }, btn('检查并写入建站规则', { icon: 'search', disabled: ro, onClick: () => plan(picker.input.value.trim()) })))));
   }
 
   parts.push(planBox, resultBox, renderRulesTemplate(ro));
@@ -1008,7 +945,7 @@ function renderWorkspace(body) {
 // 规则模板：所有客户共用
 function renderRulesTemplate(ro) {
   const box = h('details', { class: 'panel internal' }, h('summary', null, '规则模板（所有客户共用，写进 CLAUDE.md）'));
-  const area = h('textarea', { class: 'outline-editor', rows: 20, maxlength: 50000, disabled: ro, spellcheck: 'false', 'aria-label': '规则模板' });
+  const area = h('textarea', { class: 'code-editor', rows: 20, maxlength: 50000, disabled: ro, spellcheck: 'false', 'aria-label': '规则模板' });
   const stateEl = h('span', { class: 'save-state' });
   let loaded = null;
   box.addEventListener('toggle', async () => {

@@ -49,7 +49,6 @@ export function newClientRecord(id, name, now) {
     trashedAt: null,
     liveUrl: '',
     info: { contact: '', phone: '', address: '', email: '', fee: '' },
-    outline: { text: '', updatedAt: null },
     accounts: null, // null = 还没编辑过，界面显示默认清单
     workspace: { folder: '', lastWrite: null, lastCheck: null, removed: null },
     delivery: {

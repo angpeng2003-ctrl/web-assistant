@@ -92,7 +92,6 @@ function full(rec) {
     trashedAt: rec.trashedAt,
     liveUrl: rec.liveUrl,
     info: infoOf(rec),
-    outline: { text: '', updatedAt: null, ...(rec.outline || {}) },
     accounts: Array.isArray(rec.accounts) ? rec.accounts : DEFAULT_ACCOUNTS.map((a, i) => ({ id: `d${i + 1}`, ...a })),
     accountsAreDefault: !Array.isArray(rec.accounts),
     workspace: wsOf(rec),
@@ -256,20 +255,13 @@ export function createApp(config, hooks = {}) {
     r.trashedAt = null;
   }, '从回收站恢复');
 
-  // ---- 第 1 步：客户信息和网站提纲 ----
+  // ---- 第 1 步：客户信息 ----
   route('PUT', `/api/clients/${ID}/info`, async ({ m, body }) => {
     const b = checkObject(body, INFO_FIELDS, '客户信息');
     return full(await store.update(m[1], (r) => {
       r.info = infoOf(r);
       for (const [k, v] of Object.entries(b)) r.info[k] = v.trim();
     }, { log: '修改客户信息', coalesce: true }));
-  });
-
-  route('PUT', `/api/clients/${ID}/outline`, async ({ m, body }) => {
-    const b = checkObject(body, { text: { type: 'string', max: 50000 } }, '网站提纲');
-    return full(await store.update(m[1], (r) => {
-      r.outline = { text: b.text, updatedAt: new Date().toISOString() };
-    }, { log: '修改网站提纲', coalesce: true }));
   });
 
   // ---- 第 2 步：账号与准备 ----
@@ -304,7 +296,7 @@ export function createApp(config, hooks = {}) {
     return { at: now.toISOString(), folder, results: results.map(({ rel, outcome, savedAs }) => ({ rel, outcome, savedAs: savedAs || null })) };
   }
 
-  // 新建项目文件夹，并写入规则和提纲
+  // 新建项目文件夹，并写入建站规则
   route('POST', `/api/clients/${ID}/workspace/create`, async ({ m, body }) => {
     const b = checkObject(body, {
       parent: { type: 'string', max: 1000, allowSecret: true },
@@ -331,7 +323,7 @@ export function createApp(config, hooks = {}) {
     return { folder, results, record: full(updated) };
   });
 
-  // 用已有文件夹：列出规则和提纲文件的现状
+  // 用已有文件夹：列出规则文件的现状
   route('POST', `/api/clients/${ID}/workspace/plan`, async ({ m, body }) => {
     const b = checkObject(body, { folder: { type: 'string', max: 1000, allowSecret: true } });
     const folder = await resolveFolder(b.folder, config.workspaceRoots, excludes);
@@ -341,7 +333,7 @@ export function createApp(config, hooks = {}) {
   });
 
   route('POST', `/api/clients/${ID}/workspace/write`, async ({ m, body }) => {
-    const keys = ['rules', 'outline'];
+    const keys = ['rules'];
     const choiceRule = { type: 'string', enum: ['write', 'overwrite', 'newVersion', 'skip'], optional: true };
     const hashRule = { type: 'string', max: 64, pattern: /^[0-9a-f]{64}$/, optional: true, nullable: true };
     const b = checkObject(body, {
@@ -364,7 +356,7 @@ export function createApp(config, hooks = {}) {
     const updated = await store.update(m[1], (r) => {
       setFolder(r, folder);
       r.workspace.lastWrite = writeRecord(now, folder, results);
-    }, { log: `写入规则和提纲（${results.filter((x) => ['created', 'overwritten', 'savedAs'].includes(x.outcome)).length} 个文件）` });
+    }, { log: `写入建站规则（${results.filter((x) => ['created', 'overwritten', 'savedAs'].includes(x.outcome)).length} 个文件）` });
     return { results, record: full(updated) };
   });
 

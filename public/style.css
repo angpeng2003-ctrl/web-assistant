@@ -385,7 +385,7 @@ body.customer-mode .topbar .spacer { display: none; }
 }
 
 /* ---------- 客户信息、上传检查 ---------- */
-.outline-editor { width: 100%; min-height: 320px; font-family: var(--mono); font-size: 14px; line-height: 1.6; padding: 12px 14px; }
+.code-editor { width: 100%; min-height: 320px; font-family: var(--mono); font-size: 14px; line-height: 1.6; padding: 12px 14px; }
 .check-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .check-list li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
 .check-list li .i { margin-top: 3px; }
