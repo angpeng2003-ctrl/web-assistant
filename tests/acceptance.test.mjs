@@ -378,7 +378,7 @@ test('10. 疑似密码或密钥不会被保存，也不会写进项目文件', a
       assert.equal((await s.call('PUT', `/api/clients/${id}/info`, { fee: v })).status, 422, v);
       assert.equal((await s.call('PUT', `/api/clients/${id}/info`, { address: `1 Main St ${v}` })).status, 422, v);
     }
-    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ id: 'a1', name: 'GitHub', owner: '客户', status: '未开始', note: '密码：Abc12345', todo: '' }] })).status, 422);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/env`, { vercel: '密码：Abc12345' })).status, 422);
     assert.equal((await s.call('POST', `/api/clients/${id}/maintenance`, { date: '2026-11-10', category: '账号或密码相关协助', title: '重置密码', detail: '新密码是 Xyz98765!' })).status, 422);
     assert.equal((await s.call('PUT', '/api/rules-template', { text: 'token=ghp_abcdefghijklmnopqrstuvwxyz0123' })).status, 422);
     const raw = await fs.readFile(path.join(s.dataDir, 'clients', `${id}.json`), 'utf8');
@@ -414,21 +414,39 @@ test('11. 服务端安全边界：只认本机来源、拒绝未知字段、限�
   }
 });
 
-test('12. 账号清单可以记账号名（用户名或登录邮箱），不能记密码', async () => {
-  const s = await startServer();
+test('12. 账号与准备：域名和固定账号清单只记账号名；填了的才写进建站规则', async () => {
+  const root = await tempDir('jz-root-');
+  const s = await startServer({ roots: [root] });
   try {
     const { id } = (await s.call('POST', '/api/clients', { name: '账号店' })).data;
     const fresh = (await s.call('GET', `/api/clients/${id}`)).data;
-    assert.ok(fresh.accounts.every((a) => a.login === ''));
-    const accounts = [
-      { id: 'a1', name: '代码仓库（GitHub）', login: 'shop-owner', owner: '客户', status: '已就绪', note: '', todo: '' },
-      { id: 'a2', name: '托管平台（Vercel）', owner: '客户', status: '未开始', note: '', todo: '' }, // 旧数据没有 login 也能存
-    ];
-    const rec = (await s.call('PUT', `/api/clients/${id}/accounts`, { accounts })).data;
-    assert.equal(rec.accounts[0].login, 'shop-owner');
-    assert.equal(rec.accounts[1].login, undefined);
-    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ ...accounts[0], login: 'password: Abc12345!' }] })).status, 422);
-    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [{ ...accounts[0], login: 'x'.repeat(201) }] })).status, 400);
+    assert.deepEqual(Object.keys(fresh.env), ['domain', 'domainPrice', 'gmail', 'github', 'repo', 'vercel', 'registrar', 'resend', 'supabase']);
+    assert.ok(Object.values(fresh.env).every((v) => v === ''));
+    // 一项都没填：规则里没有“账号和环境”这一节
+    await s.call('POST', `/api/clients/${id}/workspace/create`, { parent: root, name: '空账号' });
+    assert.doesNotMatch(await fs.readFile(path.join(root, '空账号', 'CLAUDE.md'), 'utf8'), /账号和环境/);
+
+    let rec = (await s.call('PUT', `/api/clients/${id}/env`, { domain: 'shop.example', domainPrice: '$12.99', github: 'shop-owner', repo: 'https://github.com/shop-owner/site', resend: 're-account@shop.example' })).data;
+    assert.equal(rec.env.domainPrice, '12.99');
+    assert.equal(rec.env.github, 'shop-owner');
+    // 只改一项不会清掉别的
+    rec = (await s.call('PUT', `/api/clients/${id}/env`, { vercel: 'shop-owner' })).data;
+    assert.equal(rec.env.domain, 'shop.example');
+    // 校验
+    assert.equal((await s.call('PUT', `/api/clients/${id}/env`, { repo: 'github.com/x' })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/env`, { domainPrice: '大概十几块' })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/env`, { github: 'password: Abc12345!' })).status, 422);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/env`, { password: 'x' })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/accounts`, { accounts: [] })).status, 404);
+
+    // 填了的才写进规则，没填的（Supabase、Gmail、注册商）不出现
+    await s.call('POST', `/api/clients/${id}/workspace/create`, { parent: root, name: '有账号' });
+    const rules = await fs.readFile(path.join(root, '有账号', 'CLAUDE.md'), 'utf8');
+    assert.match(rules, /## 账号和环境/);
+    assert.match(rules, /域名：shop\.example/);
+    assert.match(rules, /主仓库：https:\/\/github\.com\/shop-owner\/site/);
+    assert.match(rules, /RESEND_API_KEY/);
+    assert.doesNotMatch(rules, /Supabase|Gmail|域名注册商：/);
   } finally {
     await s.close();
   }

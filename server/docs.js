@@ -50,6 +50,25 @@ export async function writeRulesTemplate(dataDir, text) {
   await atomicWrite(rulesFile(dataDir), text);
 }
 
+const ENV_LINES = [
+  ['domain', (v) => `- 域名：${v}`],
+  ['gmail', (v) => `- 客户的 Gmail：${v}（各平台用它注册、收验证邮件）`],
+  ['github', (v) => `- 客户的 GitHub 账号：${v}`],
+  ['repo', (v) => `- 主仓库：${v}（只有这一个仓库：网站代码 + 压缩后的图片）`],
+  ['vercel', (v) => `- Vercel：${v}（从主仓库导入，main 分支自动部署）`],
+  ['registrar', (v) => `- 域名注册商：${v}`],
+  ['resend', (v) => `- Resend：${v}（发信用；在 Vercel 加 RESEND_API_KEY 环境变量，密钥只放环境变量，不写进代码）`],
+  ['supabase', (v) => `- Supabase：${v}（在 Vercel 加 Supabase 的环境变量，密钥只放环境变量，不写进代码）`],
+];
+
+/** 账号与准备里填了的才写进规则；一项都没填就不加这一节 */
+function envSection(rec) {
+  const env = rec.env || {};
+  const lines = ENV_LINES.filter(([k]) => env[k] && String(env[k]).trim()).map(([k, f]) => f(String(env[k]).trim()));
+  if (!lines.length) return '';
+  return `\n## 账号和环境\n\n账号都在客户名下，费用客户自己付。这里只有账号名，没有密码。\n\n${lines.join('\n')}\n\n上面没列出的服务这次不用，不要自己开账号。\n`;
+}
+
 function fillTemplate(tpl, rec) {
   return tpl.replace(/\{\{店名\}\}/g, rec.name).replace(/\{\{编号\}\}/g, rec.id);
 }
@@ -58,7 +77,7 @@ function fillTemplate(tpl, rec) {
 export async function workspaceDocs(rec, dataDir) {
   const { text } = await readRulesTemplate(dataDir);
   const list = [
-    { key: 'rules', rel: 'CLAUDE.md', title: '建站规则', content: fillTemplate(text, rec) },
+    { key: 'rules', rel: 'CLAUDE.md', title: '建站规则', content: fillTemplate(text, rec).replace(/\s*$/, '\n') + envSection(rec) },
   ];
   return list.map((d) => ({ ...d, content: redactSecrets(d.content.endsWith('\n') ? d.content : `${d.content}\n`) }));
 }

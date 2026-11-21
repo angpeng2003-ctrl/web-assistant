@@ -49,7 +49,7 @@ export function newClientRecord(id, name, now) {
     trashedAt: null,
     liveUrl: '',
     info: { contact: '', phone: '', address: '', email: '', fee: '' },
-    accounts: null, // null = 还没编辑过，界面显示默认清单
+    env: { domain: '', domainPrice: '', gmail: '', github: '', repo: '', vercel: '', registrar: '', resend: '', supabase: '' },
     workspace: { folder: '', lastWrite: null, lastCheck: null, removed: null },
     delivery: {
       siteName: '',

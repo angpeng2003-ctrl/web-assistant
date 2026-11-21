@@ -9,18 +9,26 @@ import { checkRepo, moveToRecycleBin, removeRegenerable } from './git.js';
 
 const BODY_LIMIT = 1024 * 1024;
 
-export const ACCOUNT_STATUSES = ['未开始', '客户在办', '已就绪', '不需要'];
 export const MAINT_CATEGORIES = ['缺陷修复', '新需求', '账号或密码相关协助', '其他'];
 export const MAINT_STATUSES = ['待处理', '处理中', '已完成', '不处理'];
 
-export const DEFAULT_ACCOUNTS = [
-  { name: '域名（注册商账号）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '域名 DNS 管理权限', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '代码仓库（例如 GitHub）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '托管平台（例如 Vercel、Netlify）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: '询价表单收信（发信服务或表单服务）', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-  { name: 'Google 商家资料', login: '', owner: '客户', status: '未开始', note: '', todo: '' },
-];
+// 第 2 步：域名和固定的账号清单。都不强制，只记账号名，不记密码；填了的才写进报告和建站规则。
+export const ENV_KEYS = ['domain', 'domainPrice', 'gmail', 'github', 'repo', 'vercel', 'registrar', 'resend', 'supabase'];
+const ENV_FIELDS = {
+  domain: { type: 'string', max: 253, optional: true },
+  domainPrice: { type: 'string', max: 20, optional: true },
+  gmail: { type: 'string', max: 200, optional: true },
+  github: { type: 'string', max: 100, optional: true },
+  repo: { type: 'string', max: 500, pattern: URL_RE, optional: true },
+  vercel: { type: 'string', max: 200, optional: true },
+  registrar: { type: 'string', max: 200, optional: true },
+  resend: { type: 'string', max: 200, optional: true },
+  supabase: { type: 'string', max: 200, optional: true },
+};
+
+export function envOf(rec) {
+  return { ...Object.fromEntries(ENV_KEYS.map((k) => [k, ''])), ...(rec.env || {}) };
+}
 
 const INFO_FIELDS = {
   contact: { type: 'string', max: 100, optional: true },
@@ -92,8 +100,7 @@ function full(rec) {
     trashedAt: rec.trashedAt,
     liveUrl: rec.liveUrl,
     info: infoOf(rec),
-    accounts: Array.isArray(rec.accounts) ? rec.accounts : DEFAULT_ACCOUNTS.map((a, i) => ({ id: `d${i + 1}`, ...a })),
-    accountsAreDefault: !Array.isArray(rec.accounts),
+    env: envOf(rec),
     workspace: wsOf(rec),
     delivery: rec.delivery,
     maintenance: rec.maintenance,
@@ -184,7 +191,6 @@ export function createApp(config, hooks = {}) {
   route('GET', '/api/config', async () => ({
     dataDir: config.dataDir,
     workspaceRoots: config.workspaceRoots,
-    accountStatuses: ACCOUNT_STATUSES,
     maintCategories: MAINT_CATEGORIES,
     maintStatuses: MAINT_STATUSES,
     today: localDate(),
@@ -264,28 +270,16 @@ export function createApp(config, hooks = {}) {
     }, { log: '修改客户信息', coalesce: true }));
   });
 
-  // ---- 第 2 步：账号与准备 ----
-  route('PUT', `/api/clients/${ID}/accounts`, async ({ m, body }) => {
-    const b = checkObject(body, {
-      accounts: {
-        type: 'array',
-        maxItems: 40,
-        items: {
-          id: { type: 'string', max: 20, pattern: /^[A-Za-z0-9]+$/ },
-          name: { type: 'string', max: 100 },
-          login: { type: 'string', max: 200, optional: true },
-          owner: { type: 'string', max: 100 },
-          status: { type: 'string', enum: ACCOUNT_STATUSES },
-          note: { type: 'string', max: 500 },
-          todo: { type: 'string', max: 500 },
-        },
-      },
-    }, '准备清单');
+  // ---- 第 2 步：账号与准备（域名 + 固定账号清单）----
+  route('PUT', `/api/clients/${ID}/env`, async ({ m, body }) => {
+    const b = checkObject(body, ENV_FIELDS, '账号与准备');
+    if (b.domainPrice && !/^\$?\d{1,6}(\.\d{1,2})?$/.test(b.domainPrice.trim())) throw new HttpError(400, '域名价格只填数字，例如 12.99。');
     return full(await store.update(m[1], (r) => {
-      r.accounts = b.accounts;
-    }, { log: '修改账号与准备清单', coalesce: true }));
+      r.env = envOf(r);
+      for (const [k, v] of Object.entries(b)) r.env[k] = k === 'domainPrice' ? v.trim().replace(/^\$/, '') : v.trim();
+    }, { log: '修改账号与准备', coalesce: true }));
   });
-
+  // ---- 旧版账号清单接口已停用（数据还留在文件里）----
   // ---- 第 3 步：工作环境 ----
   function setFolder(r, folder) {
     r.workspace = wsOf(r);

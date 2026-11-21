@@ -341,7 +341,6 @@ dialog.dlg .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; ma
 .report th, .report td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
 .report a { color: #0f766e; }
 .report .login { font-family: var(--mono); word-break: break-all; }
-.report .accounts-table td:nth-child(3), .report .accounts-table td:nth-child(4) { white-space: nowrap; }
 .report .foot { margin-top: 28px; font-size: 13px; color: #555; }
 
 /* ---------- 客户模式 ---------- */
@@ -403,14 +402,26 @@ dialog.dlg .dlg-list p { color: var(--ink); }
 dialog.dlg .dlg-list ul { margin: 6px 0 0; padding-left: 1.2em; }
 details.panel > summary { font-weight: 600; color: var(--ink); }
 
-/* 交付报告：不包含清单和签字栏 */
-.report .report-list { margin: 4px 0; padding-left: 1.2em; }
+/* 交付报告：参考排版（标题行、紧凑的键值表） */
+.report .report-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+.report .report-head h1 { font-size: 22px; margin: 0; }
+.report .report-date { color: #555; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.report h2 { border-bottom: none; padding-bottom: 0; margin: 22px 0 6px; }
+.report .kv { grid-template-columns: 130px minmax(0, 1fr); gap: 4px 16px; }
+.report table { margin-top: 4px; }
+.report th, .report td { border: none; border-bottom: 1px solid #e3e3e3; padding: 8px 6px; }
+.report th { color: #555; font-weight: 500; }
+.report .report-list { margin: 6px 0; padding-left: 1.2em; }
 .report .report-list li { margin: 2px 0; }
-.report .sign-block { margin-top: 32px; break-inside: avoid; page-break-inside: avoid; }
-.report .sign-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 20px; }
-.report .sign-role { font-weight: 700; margin-bottom: 28px; }
-.report .sign-line { border-bottom: 1px solid #333; height: 30px; }
-.report .sign-line.thin { height: 4px; }
-.report .sign-name { min-height: 22px; padding-top: 8px; }
-.report .sign-cap { font-size: 12px; color: #555; margin: 4px 0 14px; }
-@media (max-width: 600px) { .report .sign-grid { grid-template-columns: 1fr; } }
+
+/* ---------- 账号与准备：固定账号清单 ---------- */
+.env-table { display: grid; }
+.env-row { display: grid; grid-template-columns: 140px minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--line); }
+.env-row.head { border-top: none; color: var(--muted); font-size: 13px; padding-top: 0; }
+.env-name { font-weight: 600; }
+.env-check { font-size: 13px; color: var(--muted); }
+input.mono { font-family: var(--mono); font-size: 14px; }
+@media (max-width: 720px) {
+  .env-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .env-row.head { display: none; }
+}

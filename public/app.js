@@ -501,7 +501,8 @@ function setCurrent(rec) {
 }
 
 function stepInfo(c) {
-  const ready = c.accounts.filter((a) => a.status === '已就绪' || a.status === '不需要').length;
+  const core = ['domain', 'gmail', 'github', 'repo', 'vercel', 'registrar'];
+  const filled = core.filter((k) => c.env[k]).length;
   const ws = c.workspace;
   const infoFilled = ['contact', 'phone', 'email', 'address'].filter((k) => c.info[k]).length;
   return {
@@ -509,7 +510,7 @@ function stepInfo(c) {
       sub: [c.info.contact || '负责人未填', c.info.phone].filter(Boolean).join(' · '),
       done: infoFilled >= 2,
     },
-    accounts: { sub: `${ready}/${c.accounts.length} 项就绪`, done: c.accounts.length > 0 && ready === c.accounts.length },
+    accounts: { sub: c.env.domain ? `${c.env.domain} · 已填 ${filled}/${core.length}` : `已填 ${filled}/${core.length}`, done: filled === core.length },
     workspace: {
       sub: ws.removed ? '本地文件夹已清理' : ws.folder ? ws.folder.split(/[\\/]/).pop() : '还没建文件夹',
       done: !!(ws.removed || (ws.folder && ws.lastWrite)),
@@ -1077,96 +1078,80 @@ function renderRepoPanel(c, ro) {
 }
 
 // ---------- 第 2 步：账号与准备 ----------
+// 固定的账号清单：只填账号名；“你自己核实”是提醒，建站助手查不到这些账号，所以不显示状态。
+const ENV_ROWS = [
+  { k: 'gmail', label: 'Gmail', check: '能收验证邮件', en: 'Gmail', use: 'The accounts below are registered with it' },
+  { k: 'github', label: 'GitHub', check: '你是仓库协作者，能推送', en: 'GitHub', use: 'Holds your website code' },
+  { k: 'repo', label: '主仓库', ph: 'https://github.com/店的账号/仓库名', check: '只有这一个仓库：网站代码 + 压缩后的图片', en: 'Code repository', use: 'Website code and images' },
+  { k: 'vercel', label: 'Vercel', check: '已连上客户 GitHub、能导入仓库', en: 'Vercel', use: 'Puts the website online' },
+  { k: 'registrar', label: '域名注册商', check: '域名在客户名下、开启自动续费', en: 'Domain registrar', use: 'Where your domain is registered' },
+  { k: 'resend', label: 'Resend', ph: '不用就空着', check: '发件域名验证；要用才填', en: 'Resend', use: 'Sends emails from the website' },
+  { k: 'supabase', label: 'Supabase', ph: '不用就空着', check: '项目在客户账号下；要用才填', en: 'Supabase', use: 'Stores website data' },
+];
+
 function renderAccounts(body) {
   const c = state.current;
   const ro = inactive();
-  let rows = c.accounts.map((a) => ({ ...a }));
-  const stateEl = h('span', { class: 'save-state' }, c.accountsAreDefault ? '这是默认清单，改动后自动保存' : '改动会自动保存');
-  const list = h('div', { class: 'rows' });
+  const env = { ...c.env };
+  const stateEl = h('span', { class: 'save-state', role: 'status' }, '改动会自动保存');
+  const errKey = `${c.id}:env`;
 
   const save = debounce(async () => {
-    for (const r of rows) {
-      for (const k of ['name', 'login', 'owner', 'note', 'todo']) {
-        const s = detectSecret(r[k]);
-        if (s) {
-          stateEl.textContent = `“${r.name || '未命名'}”里有疑似${s.kind}，没有保存。请删掉。`;
-          stateEl.classList.add('error');
-          markUnsaved(`${c.id}:accounts`, `准备清单：疑似${s.kind}，没有保存`);
-          return;
-        }
-      }
+    const bad = Object.values(env).map(detectSecret).find(Boolean);
+    let problem = bad ? `有疑似${bad.kind}，没有保存。这里只写账号名，不写密码。` : '';
+    if (!problem && env.repo && !/^https?:\/\/\S+$/i.test(env.repo)) problem = '主仓库要填完整网址（https:// 开头），没有保存';
+    if (!problem && env.domainPrice && !/^\$?\d{1,6}(\.\d{1,2})?$/.test(env.domainPrice.trim())) problem = '域名价格只填数字，例如 12.99，没有保存';
+    if (problem) {
+      stateEl.textContent = problem;
+      stateEl.classList.add('error');
+      markUnsaved(errKey, `账号与准备：${problem}`);
+      return;
     }
     beginSave();
     stateEl.textContent = '正在保存…';
     try {
-      const rec = await api('PUT', `/api/clients/${c.id}/accounts`, { accounts: rows });
-      setCurrent(rec);
-      stateEl.textContent = `已自动保存 ${fmtTime(rec.updatedAt)}`;
+      setCurrent(await api('PUT', `/api/clients/${c.id}/env`, env));
+      stateEl.textContent = `已保存 ${hhmm(new Date())}`;
       stateEl.classList.remove('error');
-      endSave(`${c.id}:accounts`);
+      endSave(errKey);
     } catch (e) {
       stateEl.textContent = e.message;
       stateEl.classList.add('error');
-      endSave(`${c.id}:accounts`, `准备清单：${e.message}`);
+      endSave(errKey, `账号与准备：${e.message}`);
     }
   }, 700);
 
-  function draw() {
-    list.replaceChildren(...rows.map((r, i) => {
-      const inp = (k, label, cls, ph) => {
-        const el = h('input', { type: 'text', value: r[k] || '', maxlength: k === 'name' || k === 'owner' ? 100 : k === 'login' ? 200 : 500, disabled: ro, placeholder: ph || '', autocomplete: 'off' });
-        el.addEventListener('input', () => { r[k] = el.value; save(); });
-        el.addEventListener('blur', () => save.flush());
-        return h('label', { class: `f ${cls || ''}` }, h('span', null, label), el);
-      };
-      const sel = h('select', { disabled: ro }, state.config.accountStatuses.map((s) => h('option', { value: s, selected: r.status === s }, s)));
-      sel.addEventListener('change', () => { r.status = sel.value; save.flush(); });
-      return h('div', { class: 'row-card' },
-        inp('name', '账号或资料', 'w2'),
-        inp('login', '账号名（用户名或登录邮箱）', 'w2', '例如 GitHub 用户名、注册用的邮箱；不要写密码'),
-        inp('owner', '负责人', '', '例如：客户'),
-        h('label', { class: 'f' }, h('span', null, '状态'), sel),
-        inp('todo', '待办', 'w3', '例如：请客户注册后把协作权限给我们'),
-        inp('note', '备注（不要写密码）', 'w3', '只写非敏感信息，例如在哪家注册'),
-        h('div', { class: 'actions w6' }, btn('删掉这一项', { icon: 'trash', small: true, variant: 'danger', disabled: ro, onClick: () => removeRow(i) })));
-    }));
-  }
-  draw();
-
-  async function removeRow(i) {
-    const r = rows[i];
-    const ok = await confirmDialog({
-      title: `删掉“${r.name || '未命名'}”这一项？`,
-      iconName: 'trash',
-      danger: true,
-      body: ['只是从准备清单里拿掉这一行，不会动客户的任何账号。'],
-      confirmText: '删掉',
+  const input = (k, opts = {}) => {
+    const el = h('input', {
+      id: `env-${k}`, type: 'text', value: env[k] || '', disabled: ro, autocomplete: 'off', spellcheck: 'false',
+      maxlength: k === 'repo' ? 500 : k === 'domain' ? 253 : k === 'domainPrice' ? 20 : 200,
+      placeholder: opts.ph || '', class: opts.mono ? 'mono' : null, inputmode: k === 'domainPrice' ? 'decimal' : null,
     });
-    if (!ok) return;
-    rows.splice(i, 1);
-    draw();
-    save.flush();
-  }
+    el.addEventListener('input', () => { env[k] = el.value; save(); });
+    el.addEventListener('blur', () => save.flush());
+    return el;
+  };
 
-  function addRow() {
-    rows.push({ id: `a${Date.now().toString(36)}`, name: '', login: '', owner: '客户', status: '未开始', note: '', todo: '' });
-    draw();
-    const inputs = list.querySelectorAll('.row-card:last-child input');
-    if (inputs[0]) inputs[0].focus();
-  }
-
-  const ready = rows.filter((r) => r.status === '已就绪' || r.status === '不需要').length;
   body.replaceChildren(
-    notice('', 'info',
-      h('p', null, h('strong', null, '账号属于客户，费用由客户承担。'), ' 这里只记录账号名称、负责人、状态、非敏感备注和待办。'),
-      h('p', null, '不要记录密码、访问令牌、API 密钥、私钥或其他密钥；填进来会被拦下，不会保存。'),
-      h('p', null, '平台价格和套餐常变，这里不写价格：请以服务商当前页面为准。')),
+    notice('', 'info', h('p', null, '账号由你提前手动准备，客户拥有全部账号、自己付平台费。这里都是你人工填写、自己核实：建站助手查不到这些账号，所以不显示状态，不记密码、不登录任何账号。')),
     h('div', { class: 'panel' },
-      h('h3', null, '准备清单', h('span', { class: 'en' }, `${ready}/${rows.length} 项就绪`)),
-      h('div', { class: 'toolbar' },
-        btn('加一项', { icon: 'plus', disabled: ro, onClick: addRow }),
-        stateEl),
-      list));
+      h('h3', null, '域名'),
+      h('div', { class: 'grid2' },
+        h('label', { class: 'f-label', for: 'env-domain' }, h('span', null, '买好的域名'), input('domain', { ph: '例如 example.com', mono: true })),
+        h('label', { class: 'f-label', for: 'env-domainPrice' }, h('span', null, '购买价格（每年，可不填）'), input('domainPrice', { ph: '例如 12.99' }),
+          h('small', null, '填了，报告写这个数；没填，报告写“$15–30 / 年”。')))),
+    h('div', { class: 'panel' },
+      h('h3', null, '账号清单', h('span', { class: 'en' }, '都不强制：有什么环境就填什么，留空不挡你建环境，报告和建站规则里也就不写它。')),
+      h('div', { class: 'env-table', role: 'table', 'aria-label': '账号清单' },
+        h('div', { class: 'env-row head', role: 'row' },
+          h('span', { role: 'columnheader' }, '账号'), h('span', { role: 'columnheader' }, '账号名'), h('span', { role: 'columnheader' }, '你自己核实')),
+        ENV_ROWS.map((r) => h('div', { class: 'env-row', role: 'row' },
+          h('label', { class: 'env-name', for: `env-${r.k}`, role: 'rowheader' }, r.label),
+          h('span', { role: 'cell' }, input(r.k, { ph: r.ph, mono: true })),
+          h('span', { class: 'env-check', role: 'cell' }, r.check)))),
+      h('p', { class: 'small muted', style: 'margin:12px 0 0' }, 'Resend、Supabase 填了，建站规则才写进去；记得在 Vercel 加它们的环境变量。'),
+      h('div', { class: 'toolbar', style: 'margin:8px 0 0' }, stateEl)),
+  );
 }
 
 // ---------- 第 4 步：交付与维护 ----------
@@ -1360,14 +1345,12 @@ function renderDelivery(body) {
       field('customerKeeps', '由客户自行保管的事项', { multiline: true, full: true, ph: '例如：域名注册商账号和密码、托管平台账号、邮箱登录——都由客户本人保管，我们不保存任何密码' }),
       field('maintenanceMethod', '后续维护方式', { multiline: true, full: true, ph: '例如：售后期内修复缺陷免费；新需求另行报价；通过微信或邮件联系' }),
     ),
-    h('h3', { style: 'margin-top:16px' }, '范围、价格和签字', h('span', { class: 'en' }, '印在交付报告最后，收尾款时双方签字，留给客户做凭证')),
+    h('h3', { style: 'margin-top:16px' }, '不包含的内容和价格', h('span', { class: 'en' }, '印在交付报告里；打印后在空白处手写签字即可')),
     h('div', { class: 'grid2' },
       notIncludedField,
       h('div', { class: 'full' }, btn('填入常用的“不包含”清单', { icon: 'file', small: true, variant: 'ghost', disabled: ro, onClick: fillNotIncluded })),
       field('price', '总价', { ph: 'e.g. $1,500' }),
-      field('providerName', '你的名字或公司名（签字人）', { ph: 'e.g. Jane Doe / ABC Web Studio' }),
       field('paymentTerms', '付款和修改约定', { multiline: true, full: true, ph: 'e.g. 50% deposit paid on Nov 1, 2026; balance of $750 due at delivery. Two rounds of revisions included; extra changes at $__/hour.' }),
-      field('clientSigner', '客户签字人', { ph: '默认是客户信息里的负责人' }),
     ),
     h('h3', { style: 'margin-top:16px' }, '使用的平台及费用'),
     h('p', { class: 'small muted' }, '只有同时填了“核实来源”和“核实日期”的费用会写进报告；没核实的一律显示“请以服务商当前页面为准”。'),
@@ -1452,34 +1435,6 @@ function renderLog(c) {
 
 // ---------- 交付报告 ----------
 // 交付报告是给客户看的英文版本。默认清单里的中文名称和状态换成英文；你自己填的文字原样显示。
-const ACCOUNT_NAME_EN = {
-  '域名（注册商账号）': 'Domain name (registrar account)',
-  '域名 DNS 管理权限': 'Domain DNS management access',
-  '代码仓库（例如 GitHub）': 'Code repository (e.g. GitHub)',
-  '代码仓库（GitHub）': 'Code repository (GitHub)',
-  '托管平台（例如 Vercel、Netlify）': 'Hosting platform (e.g. Vercel, Netlify)',
-  '托管平台（Vercel）': 'Hosting platform (Vercel)',
-  '询价表单收信（发信服务或表单服务）': 'Contact form email delivery (email or form service)',
-  'Google 商家资料': 'Google Business Profile',
-};
-const ACCOUNT_STATUS_EN = { '未开始': 'Not started', '客户在办': 'In progress (client)', '已就绪': 'Ready', '不需要': 'Not needed' };
-const OWNER_EN = { '客户': 'Client', '客户本人': 'Client', '我方': 'Our team', '我方协助': 'Our team (assisting)', '待定': 'To be decided' };
-
-const NOT_INCLUDED_DEFAULT = `Online store, shopping cart or online payments
-Member accounts or customer logins
-Online booking system (a link to a third-party booking page can be added)
-Inventory, order or shipping management
-Blog or news section
-Admin panel for editing content yourself
-Additional language versions
-Live chat or AI chatbot
-Connecting to other systems (CRM, POS, accounting software)
-Copywriting, photography, video, logo or brand design, translation
-Ongoing SEO work or guaranteed search rankings
-Advertising and social media management
-Domain, hosting, email and other third-party service fees (paid by the client)
-Changes beyond the agreed revision rounds, and new features after the support period`;
-
 function dateEn(ymd) {
   if (!ymd) return '';
   const d = new Date(`${ymd}T00:00:00Z`);
@@ -1489,87 +1444,77 @@ function dateEn(ymd) {
 
 function openReport(c) {
   const d = c.delivery;
-  const tr = (cells, tag = 'td') => h('tr', null, cells.map((x) => h(tag, null, x)));
+  const env = c.env;
+  const row = (cells, tag = 'td') => h('tr', null, cells.map((x) => h(tag, null, x)));
+  const kv = (...pairs) => h('dl', { class: 'kv' }, pairs.filter(Boolean).map(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
+  const blank = (text) => h('span', { class: 'muted' }, text);
+  const lines = (text) => String(text || '').split('\n').map((x) => x.trim().replace(/^[-*•]\s*/, '')).filter(Boolean);
   const platforms = (d.platforms || []).filter((p) => p.name);
-  const notYet = (text) => h('span', { class: 'muted' }, text);
-  const now = new Date();
-  const generated = `${now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`;
-  const last = d.deliveries.length > 1 ? d.deliveries[d.deliveries.length - 1].date : null;
+  const accountRows = ENV_ROWS.filter((r) => env[r.k]);
+  const name = d.siteName || c.name;
+  const repoUrl = d.repoUrl || env.repo;
+  const today = new Date();
+  const todayStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const verified = platforms.filter((p) => p.sourceUrl && p.verifiedOn).map((p) => p.verifiedOn).sort();
+
   const report = h('article', { class: 'report', lang: 'en' },
-    h('h1', null, 'Website Delivery Report'),
-    h('p', { class: 'muted' }, `${d.siteName || c.name} · Ref. ${c.id} · Prepared ${generated}`),
+    h('header', { class: 'report-head' },
+      h('h1', null, `${name} • Website Delivery Report`),
+      h('span', { class: 'report-date' }, todayStr)),
 
     h('h2', null, 'Website'),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Website name'), h('dd', null, d.siteName || c.name),
-      h('dt', null, 'Live address'), h('dd', null, c.liveUrl ? extLink(c.liveUrl) : notYet('Not set yet')),
-      h('dt', null, 'Code repository'), h('dd', null, d.repoUrl ? extLink(d.repoUrl) : notYet('Not set yet')),
-      h('dt', null, 'First delivered'), h('dd', null, d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : notYet('Not delivered yet')),
-      last ? [h('dt', null, 'Latest delivery'), h('dd', null, dateEn(last))] : null),
+    kv(
+      ['Reference', c.id],
+      ['Live address', c.liveUrl ? extLink(c.liveUrl) : blank('Not set yet')],
+      env.domain ? ['Domain', env.domain] : null,
+      ['Launch date', d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : blank('Not delivered yet')],
+      repoUrl ? ['Code', extLink(repoUrl)] : null,
+      ['Included', d.scope ? h('span', { class: 'pre' }, d.scope) : blank('Not filled in yet')],
+      d.notIncluded ? ['Not included', h('span', { class: 'muted' }, lines(d.notIncluded).join(', '))] : null,
+    ),
 
-    h('h2', null, 'What the website includes'),
-    d.scope ? h('div', { class: 'pre' }, d.scope) : h('p', null, notYet('Not filled in yet')),
+    h('h2', null, 'Accounts (all owned by you)'),
+    accountRows.length
+      ? h('table', { class: 'accounts-table' },
+        h('thead', null, row(['Account', 'Login', 'Used for'], 'th')),
+        h('tbody', null, accountRows.map((r) => row([
+          r.en,
+          r.k === 'repo' && safeHref(env[r.k]) ? extLink(env[r.k]) : h('span', { class: 'login' }, env[r.k]),
+          r.use,
+        ]))))
+      : h('p', null, blank('No accounts recorded yet')),
+    h('p', { class: 'small' }, d.customerKeeps || 'Passwords are handed over separately. Please change them right away and turn on two-step verification.'),
 
-    h('h2', null, 'Your accounts'),
-    h('p', { class: 'small' }, 'These accounts belong to you, and any fees are paid by you. This report does not contain any passwords.'),
-    h('table', { class: 'accounts-table' },
-      h('thead', null, tr(['Service', 'Account', 'Owner', 'Status'], 'th')),
-      h('tbody', null, c.accounts.filter((a) => a.status !== '不需要').map((a) => tr([
-        ACCOUNT_NAME_EN[a.name] || a.name,
-        a.login ? h('span', { class: 'login' }, a.login) : h('span', { class: 'muted' }, 'Not set yet'),
-        OWNER_EN[a.owner] || a.owner,
-        ACCOUNT_STATUS_EN[a.status] || a.status,
-      ])))),
+    h('h2', null, 'Support'),
+    kv(
+      ['Starts', d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : blank('(the day the website is delivered)')],
+      ['Ends', d.firstDeliveredAt ? `${dateEn(c.computed.warrantyEnd)} (${d.warrantyDays} days)` : blank(`(${d.warrantyDays} days after the start date)`)],
+      ['Covers', 'Free fixes for defects in features delivered'],
+      ['Not covered', 'New features, content changes, changes made by the platforms themselves, renewals'],
+      d.maintenanceMethod ? ['How to reach us', h('span', { class: 'pre' }, d.maintenanceMethod)] : null,
+    ),
 
-    h('h2', null, 'What you keep yourself'),
-    d.customerKeeps
-      ? h('div', { class: 'pre' }, d.customerKeeps)
-      : h('p', null, 'You keep all login passwords, verification codes and keys for these accounts. We do not store any of them.'),
+    (d.price || d.paymentTerms) ? [
+      h('h2', null, 'Price and payment'),
+      kv(
+        d.price ? ['Total price', d.price] : null,
+        d.paymentTerms ? ['Payment', h('span', { class: 'pre' }, d.paymentTerms)] : null,
+      ),
+    ] : null,
 
-    h('h2', null, 'Services and costs'),
-    platforms.length
+    h('h2', null, 'Running costs'),
+    (env.domain || platforms.length)
       ? h('table', null,
-        h('thead', null, tr(['Service', 'Used for', 'Cost'], 'th')),
-        h('tbody', null, platforms.map((p) => {
-          const verified = p.sourceUrl && p.verifiedOn;
-          return tr([p.name, p.purpose || '', verified
-            ? h('span', null, p.cost || '', h('br'), h('small', { class: 'muted' }, `Checked ${dateEn(p.verifiedOn)}, source: `, extLink(p.sourceUrl)))
-            : 'Please check the provider’s current pricing page']);
-        })))
-      : h('p', null, 'Prices and plans change over time. Please check each provider’s current pricing page.'),
-
-    h('h2', null, 'Support and maintenance'),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Support period'),
-      h('dd', null, d.firstDeliveredAt
-        ? `${d.warrantyDays} days, from ${dateEn(d.firstDeliveredAt)} to ${dateEn(c.computed.warrantyEnd)}`
-        : `${d.warrantyDays} days, starting from the first delivery date`),
-      h('dt', null, 'How to get help'), h('dd', { class: 'pre' }, d.maintenanceMethod || notYet('Not filled in yet'))),
-
-    h('h2', null, 'Not included'),
-    d.notIncluded
-      ? h('ul', { class: 'report-list' }, d.notIncluded.split('\n').map((x) => x.trim()).filter(Boolean).map((x) => h('li', null, x.replace(/^[-*•]\s*/, ''))))
-      : h('p', null, notYet('Not filled in yet')),
-    h('p', { class: 'small' }, 'Anything not listed under “What the website includes” is outside this project and can be quoted separately.'),
-
-    h('h2', null, 'Price and payment'),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Total price'), h('dd', null, d.price || notYet('Not filled in yet')),
-      h('dt', null, 'Payment and revisions'), h('dd', { class: 'pre' }, d.paymentTerms || notYet('Not filled in yet'))),
-
-    h('p', { class: 'foot' }, 'Costs are listed only when we have checked them against the provider’s pricing page, with the date shown. For anything else, please check the provider’s current pricing page.'),
-
-    // 双方签字：收尾款时打印出来签，客户和自己各留一份
-    h('section', { class: 'sign-block' },
-      h('h2', null, 'Acceptance and payment confirmation'),
-      h('p', null, 'By signing below, the Client confirms that the website has been delivered as described in this report, and the Provider confirms that full payment has been received. Each party keeps a signed copy.'),
-      h('div', { class: 'sign-grid' },
-        ['Client', 'Provider'].map((who) => h('div', { class: 'sign-box' },
-          h('div', { class: 'sign-role' }, who),
-          h('div', { class: 'sign-line' }), h('div', { class: 'sign-cap' }, 'Signature'),
-          h('div', { class: 'sign-name' }, who === 'Client' ? (d.clientSigner || c.info.contact || '') : (d.providerName || '')),
-          h('div', { class: 'sign-line thin' }), h('div', { class: 'sign-cap' }, 'Printed name'),
-          h('div', { class: 'sign-line' }), h('div', { class: 'sign-cap' }, 'Date'))))),
+        h('thead', null, row(['Item', 'Used for', 'Cost'], 'th')),
+        h('tbody', null,
+          env.domain ? row(['Domain', 'Your website address', env.domainPrice ? `$${env.domainPrice} / year` : '$15–30 / year']) : null,
+          platforms.map((p) => row([p.name, p.purpose || '',
+            p.sourceUrl && p.verifiedOn ? (p.cost || '') : 'See the provider’s current pricing']))))
+      : h('p', null, blank('No running costs recorded yet')),
+    env.domain ? h('ul', { class: 'report-list small' }, h('li', null, 'Domain: please keep auto-renew turned on.')) : null,
+    h('p', { class: 'foot' },
+      'Platform fees are paid by you directly to each platform. ',
+      verified.length ? `Prices were checked on ${dateEn(verified[verified.length - 1])} on each platform’s official website and may change.` : 'Prices change over time; please check each platform’s current pricing page.'),
   );
 
   const overlay = h('div', { class: 'report-overlay', role: 'dialog', 'aria-label': '交付报告（英文）' },
