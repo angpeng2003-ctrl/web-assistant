@@ -1183,6 +1183,11 @@ function renderDelivery(body) {
     maintenanceMethod: d.maintenanceMethod || '',
     warrantyDays: d.warrantyDays ?? 30,
     platforms: (d.platforms || []).map((p) => ({ ...p })),
+    price: d.price || '',
+    paymentTerms: d.paymentTerms || '',
+    notIncluded: d.notIncluded || '',
+    providerName: d.providerName || '',
+    clientSigner: d.clientSigner || c.info.contact || '',
   };
 
   const save = debounce(async () => {
@@ -1202,7 +1207,7 @@ function renderDelivery(body) {
         return;
       }
     }
-    const s = [form.siteName, form.scope, form.customerKeeps, form.maintenanceMethod, ...form.platforms.flatMap((p) => [p.name, p.purpose, p.cost])].map(detectSecret).find(Boolean);
+    const s = [form.siteName, form.scope, form.customerKeeps, form.maintenanceMethod, form.price, form.paymentTerms, form.notIncluded, form.providerName, form.clientSigner, ...form.platforms.flatMap((p) => [p.name, p.purpose, p.cost])].map(detectSecret).find(Boolean);
     if (s) {
       stateEl.textContent = `有疑似${s.kind}，没有保存。请删掉。`;
       stateEl.classList.add('error');
@@ -1239,6 +1244,16 @@ function renderDelivery(body) {
   };
 
   const scopeField = field('scope', '网站功能范围', { multiline: true, full: true, ph: '例如：首页、产品目录、关于我们、联系 / 询价；手机适配；询价表单' });
+  // “不包含”清单
+  const notIncludedField = field('notIncluded', '不包含的内容', { multiline: true, full: true, rows: 6, max: 4000, ph: '点下面的按钮填入常用清单，再删掉客户其实买了的几项' });
+  const fillNotIncluded = () => {
+    const el = notIncludedField.querySelector('textarea');
+    if (el.value.trim()) return toast('这一栏已经有内容了，常用清单只在空的时候填入', 'error');
+    form.notIncluded = NOT_INCLUDED_DEFAULT;
+    el.value = form.notIncluded;
+    save.flush();
+  };
+
   // 平台和费用
   const platBox = h('div', { class: 'rows' });
   function drawPlatforms() {
@@ -1344,6 +1359,15 @@ function renderDelivery(body) {
       field('customerKeeps', '由客户自行保管的事项', { multiline: true, full: true, ph: '例如：域名注册商账号和密码、托管平台账号、邮箱登录——都由客户本人保管，我们不保存任何密码' }),
       field('maintenanceMethod', '后续维护方式', { multiline: true, full: true, ph: '例如：售后期内修复缺陷免费；新需求另行报价；通过微信或邮件联系' }),
     ),
+    h('h3', { style: 'margin-top:16px' }, '范围、价格和签字', h('span', { class: 'en' }, '印在交付报告最后，收尾款时双方签字，留给客户做凭证')),
+    h('div', { class: 'grid2' },
+      notIncludedField,
+      h('div', { class: 'full' }, btn('填入常用的“不包含”清单', { icon: 'file', small: true, variant: 'ghost', disabled: ro, onClick: fillNotIncluded })),
+      field('price', '总价', { ph: 'e.g. $1,500' }),
+      field('providerName', '你的名字或公司名（签字人）', { ph: 'e.g. Jane Doe / ABC Web Studio' }),
+      field('paymentTerms', '付款和修改约定', { multiline: true, full: true, ph: 'e.g. 50% deposit paid on Nov 1, 2026; balance of $750 due at delivery. Two rounds of revisions included; extra changes at $__/hour.' }),
+      field('clientSigner', '客户签字人', { ph: '默认是客户信息里的负责人' }),
+    ),
     h('h3', { style: 'margin-top:16px' }, '使用的平台及费用'),
     h('p', { class: 'small muted' }, '只有同时填了“核实来源”和“核实日期”的费用会写进报告；没核实的一律显示“请以服务商当前页面为准”。'),
     platBox,
@@ -1440,6 +1464,21 @@ const ACCOUNT_NAME_EN = {
 const ACCOUNT_STATUS_EN = { '未开始': 'Not started', '客户在办': 'In progress (client)', '已就绪': 'Ready', '不需要': 'Not needed' };
 const OWNER_EN = { '客户': 'Client', '客户本人': 'Client', '我方': 'Our team', '我方协助': 'Our team (assisting)', '待定': 'To be decided' };
 
+const NOT_INCLUDED_DEFAULT = `Online store, shopping cart or online payments
+Member accounts or customer logins
+Online booking system (a link to a third-party booking page can be added)
+Inventory, order or shipping management
+Blog or news section
+Admin panel for editing content yourself
+Additional language versions
+Live chat or AI chatbot
+Connecting to other systems (CRM, POS, accounting software)
+Copywriting, photography, video, logo or brand design, translation
+Ongoing SEO work or guaranteed search rankings
+Advertising and social media management
+Domain, hosting, email and other third-party service fees (paid by the client)
+Changes beyond the agreed revision rounds, and new features after the support period`;
+
 function dateEn(ymd) {
   if (!ymd) return '';
   const d = new Date(`${ymd}T00:00:00Z`);
@@ -1505,7 +1544,30 @@ function openReport(c) {
         : `${d.warrantyDays} days, starting from the first delivery date`),
       h('dt', null, 'How to get help'), h('dd', { class: 'pre' }, d.maintenanceMethod || notYet('Not filled in yet'))),
 
+    h('h2', null, 'Not included'),
+    d.notIncluded
+      ? h('ul', { class: 'report-list' }, d.notIncluded.split('\n').map((x) => x.trim()).filter(Boolean).map((x) => h('li', null, x.replace(/^[-*•]\s*/, ''))))
+      : h('p', null, notYet('Not filled in yet')),
+    h('p', { class: 'small' }, 'Anything not listed under “What the website includes” is outside this project and can be quoted separately.'),
+
+    h('h2', null, 'Price and payment'),
+    h('dl', { class: 'kv' },
+      h('dt', null, 'Total price'), h('dd', null, d.price || notYet('Not filled in yet')),
+      h('dt', null, 'Payment and revisions'), h('dd', { class: 'pre' }, d.paymentTerms || notYet('Not filled in yet'))),
+
     h('p', { class: 'foot' }, 'Costs are listed only when we have checked them against the provider’s pricing page, with the date shown. For anything else, please check the provider’s current pricing page.'),
+
+    // 双方签字：收尾款时打印出来签，客户和自己各留一份
+    h('section', { class: 'sign-block' },
+      h('h2', null, 'Acceptance and payment confirmation'),
+      h('p', null, 'By signing below, the Client confirms that the website has been delivered as described in this report, and the Provider confirms that full payment has been received. Each party keeps a signed copy.'),
+      h('div', { class: 'sign-grid' },
+        ['Client', 'Provider'].map((who) => h('div', { class: 'sign-box' },
+          h('div', { class: 'sign-role' }, who),
+          h('div', { class: 'sign-line' }), h('div', { class: 'sign-cap' }, 'Signature'),
+          h('div', { class: 'sign-name' }, who === 'Client' ? (d.clientSigner || c.info.contact || '') : (d.providerName || '')),
+          h('div', { class: 'sign-line thin' }), h('div', { class: 'sign-cap' }, 'Printed name'),
+          h('div', { class: 'sign-line' }), h('div', { class: 'sign-cap' }, 'Date'))))),
   );
 
   const overlay = h('div', { class: 'report-overlay', role: 'dialog', 'aria-label': '交付报告（英文）' },

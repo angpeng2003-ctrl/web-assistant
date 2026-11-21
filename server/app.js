@@ -443,6 +443,11 @@ export function createApp(config, hooks = {}) {
       maintenanceMethod: { type: 'string', max: 2000, optional: true },
       warrantyDays: { type: 'integer', min: 0, max: 3650, optional: true },
       platforms: { type: 'array', maxItems: 20, items: platformItem, optional: true },
+      price: { type: 'string', max: 200, optional: true },
+      paymentTerms: { type: 'string', max: 2000, optional: true },
+      notIncluded: { type: 'string', max: 4000, optional: true },
+      providerName: { type: 'string', max: 200, optional: true },
+      clientSigner: { type: 'string', max: 200, optional: true },
     }, '交付信息');
     if (b.platforms) {
       for (const p of b.platforms) {
@@ -450,7 +455,7 @@ export function createApp(config, hooks = {}) {
       }
     }
     return full(await store.update(m[1], (r) => {
-      for (const k of ['siteName', 'repoUrl', 'scope', 'customerKeeps', 'maintenanceMethod', 'warrantyDays', 'platforms']) {
+      for (const k of ['siteName', 'repoUrl', 'scope', 'customerKeeps', 'maintenanceMethod', 'warrantyDays', 'platforms', 'price', 'paymentTerms', 'notIncluded', 'providerName', 'clientSigner']) {
         if (b[k] !== undefined) r.delivery[k] = b[k];
       }
       if (b.siteUrl !== undefined) r.liveUrl = b.siteUrl.trim();

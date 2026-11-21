@@ -323,6 +323,13 @@ test('8. 交付日期：再次交付和重新打开不改售后起算日', async
     rec = (await s.call('POST', `/api/clients/${id}/delivery/correct-start`, { date: '2026-10-30', reason: '当时记错' })).data;
     assert.equal(rec.delivery.firstDeliveredAt, '2026-10-30');
     assert.equal((await s.call('PUT', `/api/clients/${id}/delivery`, { siteUrl: 'javascript:alert(1)' })).status, 400);
+    // 签字页用到的范围、价格和签字人
+    rec = (await s.call('PUT', `/api/clients/${id}/delivery`, { price: '$1,500', paymentTerms: '50% deposit, balance at delivery', notIncluded: 'Online store\nBlog', providerName: 'Jane Doe', clientSigner: 'John Smith' })).data;
+    assert.equal(rec.delivery.price, '$1,500');
+    assert.equal(rec.delivery.notIncluded, 'Online store\nBlog');
+    assert.equal(rec.delivery.clientSigner, 'John Smith');
+    assert.equal((await s.call('PUT', `/api/clients/${id}/delivery`, { price: 'x'.repeat(201) })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/delivery`, { paymentTerms: 'token=ghp_abcdefghijklmnopqrstuvwxyz0123' })).status, 422);
   } finally {
     await s.close();
   }
