@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Store, HttpError } from './store.js';
 import { checkObject, isRealDate, URL_RE } from './validate.js';
-import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES } from './docs.js';
+import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES, starterPack } from './docs.js';
 import { resolveFolder, planFiles, writeFiles, listDirs, createProjectFolder, resolveDeletableFolder } from './workspace.js';
 import { checkRepo, moveToRecycleBin, removeRegenerable, cloneRepo } from './git.js';
 import { trashName } from '../shared/report.js';
@@ -71,7 +71,13 @@ function infoOf(rec) {
 }
 
 function wsOf(rec) {
-  return { folder: '', lastWrite: null, lastCheck: null, removed: null, ...(rec.workspace || {}) };
+  return { folder: '', lastWrite: null, lastCheck: null, removed: null, starterAt: null, ...(rec.workspace || {}) };
+}
+
+// 建站方式：老客户的文件里没有这个字段，按本地文件夹算
+export const BUILD_MODES = ['cloud', 'local'];
+export function modeOf(rec) {
+  return BUILD_MODES.includes(rec.buildMode) ? rec.buildMode : 'local';
 }
 
 function summary(rec) {
@@ -100,6 +106,7 @@ function full(rec) {
     archivedAt: rec.archivedAt,
     trashedAt: rec.trashedAt,
     liveUrl: rec.liveUrl,
+    buildMode: modeOf(rec),
     info: infoOf(rec),
     env: envOf(rec),
     workspace: wsOf(rec),
@@ -237,12 +244,15 @@ export function createApp(config, hooks = {}) {
     const b = checkObject(body, {
       name: { type: 'string', max: 100, optional: true },
       liveUrl: { type: 'string', max: 500, pattern: URL_RE, optional: true },
+      buildMode: { type: 'string', enum: BUILD_MODES, optional: true },
     });
     if (b.name !== undefined && !b.name.trim()) throw new HttpError(400, '名称不能为空。');
+    const log = b.buildMode !== undefined ? `建站方式改成${b.buildMode === 'cloud' ? '云端' : '本地文件夹'}` : '修改名称或网址';
     return full(await store.update(m[1], (r) => {
       if (b.name !== undefined) r.name = b.name.trim();
       if (b.liveUrl !== undefined) r.liveUrl = b.liveUrl.trim();
-    }, { log: '修改名称或网址', coalesce: true }));
+      if (b.buildMode !== undefined) r.buildMode = b.buildMode;
+    }, { log, coalesce: b.buildMode === undefined }));
   });
 
   const lifecycle = (action, fn, log) =>
@@ -282,6 +292,19 @@ export function createApp(config, hooks = {}) {
   });
   // ---- 旧版账号清单接口已停用（数据还留在文件里）----
   // ---- 第 3 步：工作环境 ----
+  // 云端建站：生成开工包（贴进客户 Claude Project 的文字），并记下生成时间
+  route('POST', `/api/clients/${ID}/starter-pack`, async ({ m, body }) => {
+    checkObject(body, {});
+    let text = '';
+    const record = full(await store.update(m[1], async (r) => {
+      if (modeOf(r) !== 'cloud') throw new HttpError(409, '这个客户用的是本地文件夹，没有开工包。先把建站方式改成云端。');
+      text = await starterPack(r, config.dataDir);
+      r.workspace = wsOf(r);
+      r.workspace.starterAt = new Date().toISOString();
+    }, { log: '生成开工包', coalesce: true }));
+    return { text, record };
+  });
+
   function setFolder(r, folder) {
     r.workspace = wsOf(r);
     if (r.workspace.folder !== folder) r.workspace.lastCheck = null;

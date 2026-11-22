@@ -47,3 +47,26 @@ export function howToUse(rec) {
   });
   return out;
 }
+
+/**
+ * 交付报告 “Developer access” 一段（只对云端建站的客户）：
+ * 建站时开发者是仓库协作者、仓库上装了 Claude GitHub App；交接后这些权限还在，要告诉客户怎么移除。
+ * 返回 [{ label, text }]，没有就返回空列表。
+ */
+export function developerAccess(rec) {
+  if (!rec || rec.buildMode !== 'cloud') return [];
+  return [
+    {
+      label: 'What remains',
+      text: 'While building your website, our GitHub account was added to your code repository as a collaborator, and the Claude GitHub App was installed on it so the website could be built in the cloud. Both still have access after delivery.',
+    },
+    {
+      label: 'Your choice',
+      text: 'You can keep this access if you want us to be able to make changes later, or remove it at any time. Removing it does not affect your live website.',
+    },
+    {
+      label: 'How to remove it',
+      text: 'In GitHub, open the repository, go to Settings → Collaborators and remove our account. Then go to your account Settings → Applications → Installed GitHub Apps and uninstall Claude (or remove this repository from it).',
+    },
+  ];
+}

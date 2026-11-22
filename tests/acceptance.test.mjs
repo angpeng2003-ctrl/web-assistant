@@ -549,8 +549,8 @@ test('15. “回收站”文案按系统显示，建站规则模板不分系统'
   assert.equal(trashName('darwin'), '废纸篓');
   assert.equal(trashName('win32'), '回收站');
   const { DEFAULT_RULES } = await import('../server/docs.js');
-  assert.doesNotMatch(DEFAULT_RULES, /Windows/);
-  assert.match(DEFAULT_RULES, /废纸篓/);
+  // 规则模板是云端版：不提哪个系统，也不提本地文件夹和回收站
+  assert.doesNotMatch(DEFAULT_RULES, /Windows|废纸篓|回收站/);
   const s = await startServer();
   try {
     const cfg = (await s.call('GET', '/api/config')).data;
@@ -633,6 +633,87 @@ test('17b. 已有客户的售后天数不被改动', async () => {
   try {
     const rec = (await s.call('GET', `/api/clients/${id}`)).data;
     assert.equal(rec.delivery.warrantyDays, 30);
+  } finally {
+    await s.close();
+  }
+});
+
+test('18. 建站方式：新客户默认云端，老客户按本地文件夹；只接受 cloud / local', async () => {
+  const dataDir = await tempDir();
+  let s = await startServer({ dataDir });
+  const { id, buildMode } = (await s.call('POST', '/api/clients', { name: '云端店' })).data;
+  assert.equal(buildMode, 'cloud');
+  const old = (await s.call('POST', '/api/clients', { name: '老客户' })).data.id;
+  await s.close();
+  // 模拟改版前存下的记录：没有 buildMode 字段
+  const file = path.join(dataDir, 'clients', `${old}.json`);
+  const raw = JSON.parse(await fs.readFile(file, 'utf8'));
+  delete raw.buildMode;
+  await fs.writeFile(file, JSON.stringify(raw, null, 2));
+  s = await startServer({ dataDir });
+  try {
+    assert.equal((await s.call('GET', `/api/clients/${old}`)).data.buildMode, 'local');
+    assert.equal((await s.call('PATCH', `/api/clients/${id}`, { buildMode: 'remote' })).status, 400);
+    const r = await s.call('PATCH', `/api/clients/${old}`, { buildMode: 'cloud' });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.buildMode, 'cloud');
+    assert.ok(r.data.log.some((x) => x.action === '建站方式改成云端'));
+    // 改回本地也可以
+    assert.equal((await s.call('PATCH', `/api/clients/${old}`, { buildMode: 'local' })).data.buildMode, 'local');
+  } finally {
+    await s.close();
+  }
+});
+
+test('19. 开工包：让云端 Claude 存成 CLAUDE.md，带填好的建站规则和账号名；只给云端客户', async () => {
+  const s = await startServer();
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '子店' })).data;
+    await s.call('PUT', `/api/clients/${id}/env`, { domain: 'zi.example', repo: 'https://github.com/zi-owner/site', vercel: 'zi-owner' });
+    // 不接受多余字段
+    assert.equal((await s.call('POST', `/api/clients/${id}/starter-pack`, { x: 1 })).status, 400);
+    const r = await s.call('POST', `/api/clients/${id}/starter-pack`, {});
+    assert.equal(r.status, 200);
+    const t = r.data.text;
+    assert.match(t, /存成仓库根目录的 CLAUDE\.md/);
+    assert.match(t, /# 子店 · 建站规则/);
+    assert.match(t, new RegExp(`客户编号：${id}`));
+    assert.match(t, /Next\.js/);
+    assert.match(t, /21st\.dev/);
+    assert.match(t, /UI UX Pro Max/);
+    assert.match(t, /docs\/handoff\.md/);
+    assert.match(t, /zi\.example/);
+    assert.match(t, /https:\/\/github\.com\/zi-owner\/site/);
+    assert.equal(detectSecret(t), null);
+    assert.ok(r.data.record.workspace.starterAt);
+    assert.ok(r.data.record.log.some((x) => x.action === '生成开工包'));
+    // 不在这台电脑上建任何文件夹
+    assert.deepEqual(await fs.readdir(s.roots[0]), []);
+
+    // 本地文件夹的客户没有开工包
+    await s.call('PATCH', `/api/clients/${id}`, { buildMode: 'local' });
+    assert.equal((await s.call('POST', `/api/clients/${id}/starter-pack`, {})).status, 409);
+  } finally {
+    await s.close();
+  }
+});
+
+test('20. 交付报告 Developer access：只对云端客户，写明协作者和 Claude App 还有权限、怎么移除', async () => {
+  const { developerAccess } = await import('../shared/report.js');
+  const s = await startServer();
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '丑店' })).data;
+    let rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    const text = developerAccess(rec).map((x) => `${x.label}: ${x.text}`).join('\n');
+    assert.match(text, /collaborator/);
+    assert.match(text, /Claude GitHub App/);
+    assert.match(text, /remove it at any time/);
+    assert.match(text, /Settings → Collaborators/);
+    rec = (await s.call('PATCH', `/api/clients/${id}`, { buildMode: 'local' })).data;
+    assert.deepEqual(developerAccess(rec), []);
+    const ui = await fs.readFile(path.join(APP_ROOT, 'public', 'app.js'), 'utf8');
+    assert.match(ui, /Developer access/);
+    assert.match(ui, /复制开工包/);
   } finally {
     await s.close();
   }
