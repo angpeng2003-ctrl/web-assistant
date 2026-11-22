@@ -7,6 +7,7 @@ import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES, st
 import { resolveFolder, planFiles, writeFiles, listDirs, createProjectFolder, resolveDeletableFolder } from './workspace.js';
 import { checkRepo, moveToRecycleBin, removeRegenerable, cloneRepo } from './git.js';
 import { trashName } from '../shared/report.js';
+import { SETUP_KEYS } from '../shared/setup.js';
 
 const BODY_LIMIT = 1024 * 1024;
 
@@ -90,6 +91,10 @@ function wsOf(rec) {
 
 // 建站方式：老客户的文件里没有这个字段，按本地文件夹算
 export const BUILD_MODES = ['cloud', 'local'];
+function setupOf(rec) {
+  const done = (rec.setup && rec.setup.done) || {};
+  return { done: Object.fromEntries(SETUP_KEYS.filter((k) => done[k]).map((k) => [k, done[k]])) };
+}
 export function modeOf(rec) {
   return BUILD_MODES.includes(rec.buildMode) ? rec.buildMode : 'local';
 }
@@ -124,6 +129,7 @@ function full(rec) {
     info: infoOf(rec),
     env: envOf(rec),
     workspace: wsOf(rec),
+    setup: setupOf(rec),
     delivery: rec.delivery,
     maintenance: rec.maintenance,
     log: rec.log,
@@ -302,17 +308,27 @@ export function createApp(config, hooks = {}) {
     }, { log: '修改客户信息', coalesce: true }));
   });
 
-  // ---- 第 2 步：账号与准备（域名 + 固定账号清单）----
+  // ---- 第 2 步：客户账号（域名 + 固定账号清单）----
   route('PUT', `/api/clients/${ID}/env`, async ({ m, body }) => {
-    const b = checkObject(body, ENV_FIELDS, '账号与准备');
+    const b = checkObject(body, ENV_FIELDS, '客户账号');
     if (b.domainPrice && !/^\$?\d{1,6}(\.\d{1,2})?$/.test(b.domainPrice.trim())) throw new HttpError(400, '域名价格只填数字，例如 12.99。');
     return full(await store.update(m[1], (r) => {
       r.env = envOf(r);
       for (const [k, v] of Object.entries(b)) r.env[k] = k === 'domainPrice' ? v.trim().replace(/^\$/, '') : v.trim();
-    }, { log: '修改账号与准备', coalesce: true }));
+    }, { log: '修改客户账号', coalesce: true }));
   });
   // ---- 旧版账号清单接口已停用（数据还留在文件里）----
   // ---- 第 3 步：工作环境 ----
+  // 云端建站的开工准备：负责人自己给某一步打勾或取消（只是进度，不检查账号）
+  route('PUT', `/api/clients/${ID}/setup`, async ({ m, body }) => {
+    const b = checkObject(body, { step: { type: 'string', enum: SETUP_KEYS }, done: { type: 'boolean' } }, '开工准备');
+    return full(await store.update(m[1], (r) => {
+      r.setup = setupOf(r);
+      if (b.done) r.setup.done[b.step] = r.setup.done[b.step] || new Date().toISOString();
+      else delete r.setup.done[b.step];
+    }, { log: '更新开工准备', coalesce: true }));
+  });
+
   // 云端建站：生成开工包（贴进客户 Claude Project 的文字），并记下生成时间
   route('POST', `/api/clients/${ID}/starter-pack`, async ({ m, body }) => {
     checkObject(body, {});

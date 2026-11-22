@@ -415,7 +415,7 @@ test('11. 服务端安全边界：只认本机来源、拒绝未知字段、限�
   }
 });
 
-test('12. 账号与准备：域名和固定账号清单只记账号名；填了的才写进建站规则', async () => {
+test('12. 客户账号：域名和固定账号清单只记账号名；填了的才写进建站规则', async () => {
   const root = await tempDir('jz-root-');
   const s = await startServer({ roots: [root] });
   try {
@@ -752,6 +752,49 @@ test('21. 我的 GitHub：存一次所有客户共用，只记用户名，不写
   s = await startServer({ dataDir });
   try {
     assert.equal((await s.call('GET', '/api/settings')).data.myGithub, 'dev-name');
+  } finally {
+    await s.close();
+  }
+});
+
+test('22. 开工准备：自己打勾记进度，只认固定的步骤；进度按“开工前”算完成', async () => {
+  const { setupProgress, SETUP_KEYS } = await import('../shared/setup.js');
+  const s = await startServer();
+  try {
+    const { id, setup } = (await s.call('POST', '/api/clients', { name: '寅店' })).data;
+    assert.deepEqual(setup, { done: {} });
+    assert.equal(SETUP_KEYS.length, 10);
+    // 未知步骤、缺字段、多字段都拒绝
+    assert.equal((await s.call('PUT', `/api/clients/${id}/setup`, { step: 'nope', done: true })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/setup`, { step: 'gmail' })).status, 400);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/setup`, { step: 'gmail', done: true, x: 1 })).status, 400);
+
+    let rec = (await s.call('PUT', `/api/clients/${id}/setup`, { step: 'gmail', done: true })).data;
+    const first = rec.setup.done.gmail;
+    assert.ok(first);
+    // 再勾一次不改时间；取消就去掉
+    rec = (await s.call('PUT', `/api/clients/${id}/setup`, { step: 'gmail', done: true })).data;
+    assert.equal(rec.setup.done.gmail, first);
+    rec = (await s.call('PUT', `/api/clients/${id}/setup`, { step: 'gmail', done: false })).data;
+    assert.equal(rec.setup.done.gmail, undefined);
+
+    for (const k of ['gmail', 'github', 'repo', 'collab', 'app', 'project']) await s.call('PUT', `/api/clients/${id}/setup`, { step: k, done: true });
+    rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    let p = setupProgress(rec.setup);
+    assert.deepEqual([p.startDone, p.startTotal, p.done, p.total], [6, 7, 6, 10]);
+    rec = (await s.call('PUT', `/api/clients/${id}/setup`, { step: 'starter', done: true })).data;
+    p = setupProgress(rec.setup);
+    assert.equal(p.startDone, p.startTotal);
+    assert.ok(rec.log.some((x) => x.action === '更新开工准备'));
+
+    // 归档后只读
+    await s.call('POST', `/api/clients/${id}/archive`);
+    assert.equal((await s.call('PUT', `/api/clients/${id}/setup`, { step: 'domain', done: true })).status, 409);
+
+    const ui = await fs.readFile(path.join(APP_ROOT, 'public', 'app.js'), 'utf8');
+    assert.match(ui, /开工准备/);
+    assert.match(ui, /installations\/select_target/);
+    assert.match(ui, /settings\/access/);
   } finally {
     await s.close();
   }

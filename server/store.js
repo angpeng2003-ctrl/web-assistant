@@ -52,6 +52,7 @@ export function newClientRecord(id, name, now) {
     info: { contact: '', phone: '', address: '', email: '', fee: '' },
     env: { domain: '', domainPrice: '', gmail: '', github: '', repo: '', vercel: '', registrar: '', resend: '', supabase: '' },
     workspace: { folder: '', lastWrite: null, lastCheck: null, removed: null, starterAt: null },
+    setup: { done: {} }, // 云端建站的开工准备：步骤名 → 打勾的时间
     delivery: {
       siteName: '',
       siteUrl: '',
