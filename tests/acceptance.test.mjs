@@ -339,6 +339,7 @@ test('9. 维护请求可记录；归档、回收站都可恢复，且期间只�
   const s = await startServer();
   try {
     const { id } = (await s.call('POST', '/api/clients', { name: '癸店' })).data;
+    await s.call('PUT', `/api/clients/${id}/delivery`, { warrantyDays: 30 }); // 新客户默认 0 天，这里设成有售后
     await s.call('POST', `/api/clients/${id}/delivery/deliver`, { date: '2026-11-01' });
     let rec = (await s.call('POST', `/api/clients/${id}/maintenance`, { date: '2026-11-10', category: '缺陷修复', title: '联系页电话打不通' })).data;
     assert.equal(rec.maintenance[0].inWarranty, 'yes');
@@ -498,6 +499,178 @@ test('13b. 下载继续修改：正式运行时只接受 https 地址', async ()
       assert.equal(r.status, 400, url);
       assert.equal(await exists(path.join(root, 'x')), false, url);
     }
+  } finally {
+    await s.close();
+  }
+});
+
+// ---------- Mac 支持 ----------
+test('14. Mac 上用访达移到废纸篓：路径作为参数传，不拼进脚本；Windows 走回收站；其他系统报不支持', async () => {
+  const { moveToRecycleBin } = await import('../server/git.js');
+  const calls = [];
+  const fakeExec = (cmd, args, opts, cb) => {
+    calls.push({ cmd, args, opts });
+    cb(null, '', '');
+  };
+  const target = '/Users/someone/网站建设/a "b"; do shell script "rm -rf ~"';
+  await moveToRecycleBin(target, { platform: 'darwin', exec: fakeExec });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cmd, 'osascript');
+  assert.equal(calls[0].args[calls[0].args.length - 1], target);
+  const script = calls[0].args.filter((_, i, a) => a[i - 1] === '-e').join('\n');
+  assert.match(script, /on run argv/);
+  assert.match(script, /Finder/);
+  assert.match(script, /delete/);
+  assert.ok(!script.includes(target) && !script.includes('someone'), '路径不能拼进脚本');
+
+  // 相对路径不交给系统命令
+  await assert.rejects(moveToRecycleBin('relative/dir', { platform: 'darwin', exec: fakeExec }), (e) => e.status === 400);
+  assert.equal(calls.length, 1);
+
+  // 访达报错（例如没给自动化权限）时给出明白的提示
+  const failExec = (_c, _a, _o, cb) => cb(Object.assign(new Error('x'), { code: 1 }), '', 'execution error: Not authorized to send Apple events to Finder. (-1743)');
+  await assert.rejects(moveToRecycleBin('/tmp/x', { platform: 'darwin', exec: failExec }), (e) => e.status === 500 && /废纸篓/.test(e.message) && /自动化/.test(e.message));
+
+  // Windows 仍然走回收站，路径通过环境变量传
+  calls.length = 0;
+  await moveToRecycleBin('C:\\sites\\a', { platform: 'win32', exec: fakeExec });
+  assert.equal(calls[0].cmd, 'powershell.exe');
+  assert.equal(calls[0].opts.env.JZ_TARGET, 'C:\\sites\\a');
+  assert.ok(!calls[0].args.join(' ').includes('C:\\sites\\a'));
+
+  // Linux 等不支持
+  calls.length = 0;
+  await assert.rejects(moveToRecycleBin('/home/x', { platform: 'linux', exec: fakeExec }), (e) => e.status === 501);
+  assert.equal(calls.length, 0);
+});
+
+test('15. “回收站”文案按系统显示，建站规则模板不分系统', async () => {
+  const { trashName } = await import('../shared/report.js');
+  assert.equal(trashName('darwin'), '废纸篓');
+  assert.equal(trashName('win32'), '回收站');
+  const { DEFAULT_RULES } = await import('../server/docs.js');
+  assert.doesNotMatch(DEFAULT_RULES, /Windows/);
+  assert.match(DEFAULT_RULES, /废纸篓/);
+  const s = await startServer();
+  try {
+    const cfg = (await s.call('GET', '/api/config')).data;
+    assert.equal(cfg.platform, process.platform);
+    // 前端按 platform 选文案，不再写死“Windows 回收站”
+    const ui = await fs.readFile(path.join(APP_ROOT, 'public', 'app.js'), 'utf8');
+    assert.doesNotMatch(ui, /Windows 回收站/);
+    assert.match(ui, /trashName/);
+    // 前端能取到共用模块
+    const mod = await s.call('GET', '/shared/report.js');
+    assert.equal(mod.status, 200);
+  } finally {
+    await s.close();
+  }
+});
+
+test('16. Mac 双击启动脚本：检查 node、打开 4520、运行服务；保留 .cmd', async () => {
+  const cmd = path.join(APP_ROOT, '启动建站助手.command');
+  const text = await fs.readFile(cmd, 'utf8');
+  assert.match(text, /^#!\/bin\/bash/);
+  assert.match(text, /command -v node/);
+  assert.match(text, /open "http:\/\/127\.0\.0\.1:4520"/);
+  assert.match(text, /node server\/index\.js/);
+  if (process.platform !== 'win32') assert.ok(((await fs.stat(cmd)).mode & 0o111) !== 0, '要有执行权限');
+  assert.ok(await exists(path.join(APP_ROOT, '启动建站助手.cmd')));
+});
+
+test('17. 交付报告：How to use your website；新客户默认不含售后，售后天数大于 0 才有 Support', async () => {
+  const { howToUse, hasSupport } = await import('../shared/report.js');
+  const s = await startServer();
+  try {
+    const { id } = (await s.call('POST', '/api/clients', { name: '癸店' })).data;
+    let rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.equal(rec.delivery.warrantyDays, 0);
+    assert.equal(hasSupport(rec.delivery), false);
+
+    // 账号清单都没填：不提“客户拥有什么”，但一定写不含维护
+    let items = howToUse(rec);
+    const text = (xs) => xs.map((x) => `${x.label}: ${x.text}`).join('\n');
+    assert.deepEqual(items.map((x) => x.label), ['Making changes', 'Maintenance']);
+    assert.match(text(items), /ongoing maintenance is not included after delivery/i);
+    assert.match(text(items), /main/);
+    assert.match(text(items), /developer/);
+
+    // 只提填了的：域名和 GitHub，没填 Vercel
+    await s.call('PUT', `/api/clients/${id}/env`, { domain: 'shop.example', repo: 'https://github.com/shop-owner/site' });
+    rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    items = howToUse(rec);
+    const owned = items.find((x) => x.label === 'What you own').text;
+    assert.match(owned, /shop\.example/);
+    assert.match(owned, /GitHub/);
+    assert.doesNotMatch(owned, /Vercel/);
+    assert.match(owned, /pay each platform directly/);
+    assert.match(text(items), /https:\/\/github\.com\/shop-owner\/site/);
+
+    await s.call('PUT', `/api/clients/${id}/env`, { vercel: 'shop-owner' });
+    rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.match(text(howToUse(rec)), /Vercel puts them online automatically/);
+
+    // 售后天数大于 0：显示 Support，维护说明改成“售后期之外”
+    rec = (await s.call('PUT', `/api/clients/${id}/delivery`, { warrantyDays: 14 })).data;
+    assert.equal(hasSupport(rec.delivery), true);
+    assert.match(text(howToUse(rec)), /Apart from the support period below, ongoing maintenance is not included after delivery/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('17b. 已有客户的售后天数不被改动', async () => {
+  const dataDir = await tempDir();
+  let s = await startServer({ dataDir });
+  const { id } = (await s.call('POST', '/api/clients', { name: '旧客户' })).data;
+  await s.close();
+  // 模拟改版前存下的记录（当时默认 30 天）
+  const file = path.join(dataDir, 'clients', `${id}.json`);
+  const raw = JSON.parse(await fs.readFile(file, 'utf8'));
+  raw.delivery.warrantyDays = 30;
+  await fs.writeFile(file, JSON.stringify(raw, null, 2));
+  s = await startServer({ dataDir });
+  try {
+    const rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.equal(rec.delivery.warrantyDays, 30);
+  } finally {
+    await s.close();
+  }
+});
+
+test('18. 我的 GitHub：存一次所有客户共用，只记用户名，不写进客户记录和建站规则', async () => {
+  const dataDir = await tempDir();
+  let s = await startServer({ dataDir });
+  try {
+    assert.deepEqual((await s.call('GET', '/api/settings')).data, { myGithub: '' });
+    let r = await s.call('PUT', '/api/settings', { myGithub: 'dev-name' });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.myGithub, 'dev-name');
+    // 用户名格式不对、未知字段、疑似密钥、太长：都不保存
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: '-bad' })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'a b' })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'x'.repeat(40) })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'dev', token: 'x' })).status, 400);
+    assert.notEqual((await s.call('PUT', '/api/settings', { myGithub: 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })).status, 200);
+    // 只认本机页面发来的修改
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'evil' }, { origin: 'https://evil.example' })).status, 403);
+    // 可以清空
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: '' })).data.myGithub, '');
+    await s.call('PUT', '/api/settings', { myGithub: 'dev-name' });
+    // 新客户的记录和建站规则里都没有
+    const { id } = (await s.call('POST', '/api/clients', { name: '子店' })).data;
+    const rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.ok(!JSON.stringify(rec).includes('dev-name'));
+    assert.equal(rec.env.github, '');
+    const docs = await s.call('POST', `/api/clients/${id}/workspace/plan`, { folder: path.join(s.roots[0], 'zi-site'), create: true });
+    assert.ok(!JSON.stringify(docs.data).includes('dev-name'));
+  } finally {
+    await s.close();
+  }
+  // 重启后还在
+  s = await startServer({ dataDir });
+  try {
+    assert.equal((await s.call('GET', '/api/settings')).data.myGithub, 'dev-name');
   } finally {
     await s.close();
   }

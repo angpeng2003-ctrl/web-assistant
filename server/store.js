@@ -58,7 +58,7 @@ export function newClientRecord(id, name, now) {
       scope: '',
       customerKeeps: '',
       maintenanceMethod: '',
-      warrantyDays: 30,
+      warrantyDays: 0, // 默认不含售后；已有客户的数据不改
       platforms: [],
       firstDeliveredAt: null,
       deliveries: [],

@@ -7,7 +7,8 @@ import { createApp } from '../server/app.js';
 import { APP_ROOT } from '../server/config.js';
 
 export async function tempDir(prefix = 'jz-test-') {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  // Mac 的临时文件夹在 /var 下，/var 是指向 /private/var 的链接；取真实路径，免得被“拒绝链接”的检查拦下
+  return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
 }
 
 export async function startServer({ dataDir, roots, hooks } = {}) {
