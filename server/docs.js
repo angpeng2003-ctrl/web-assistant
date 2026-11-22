@@ -67,7 +67,7 @@ const ENV_LINES = [
   ['supabase', (v) => `- Supabase：${v}（在 Vercel 加 Supabase 的环境变量，密钥只放环境变量，不写进代码）`],
 ];
 
-/** 账号与准备里填了的才写进规则；一项都没填就不加这一节 */
+/** 客户账号里填了的才写进规则；一项都没填就不加这一节 */
 function envSection(rec) {
   const env = rec.env || {};
   const lines = ENV_LINES.filter(([k]) => env[k] && String(env[k]).trim()).map(([k, f]) => f(String(env[k]).trim()));

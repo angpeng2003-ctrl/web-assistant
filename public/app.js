@@ -2,6 +2,7 @@
 // 交互规范见 docs/design-system.md
 import { detectSecret } from '/shared/secrets.js';
 import { trashName, hasSupport, howToUse, developerAccess } from '/shared/report.js';
+import { SETUP_STEPS, setupProgress } from '/shared/setup.js';
 
 // 系统回收站的叫法：Mac 是“废纸篓”，Windows 是“回收站”（侧栏的“回收站”是台账自己的，不用这个）
 const binName = () => trashName(state.config && state.config.platform);
@@ -253,7 +254,7 @@ const state = {
 
 const STEPS = [
   { id: 'info', title: '客户信息', en: 'Client' },
-  { id: 'accounts', title: '账号与准备', en: 'Accounts' },
+  { id: 'accounts', title: '客户账号', en: 'Accounts' },
   { id: 'workspace', title: '工作环境', en: 'Project files' },
   { id: 'delivery', title: '交付与维护', en: 'Delivery & care' },
 ];
@@ -517,7 +518,10 @@ function stepInfo(c) {
     },
     accounts: { sub: c.env.domain ? `${c.env.domain} · 已填 ${filled}/${core.length}` : `已填 ${filled}/${core.length}`, done: filled === core.length },
     workspace: c.buildMode === 'cloud' && !ws.folder
-      ? { sub: ws.starterAt ? '云端建站 · 开工包已生成' : '云端建站 · 还没拿开工包', done: !!ws.starterAt }
+      ? (() => {
+        const p = setupProgress(c.setup);
+        return { sub: `已完成 ${p.done}/${p.total}`, done: p.startDone === p.startTotal };
+      })()
       : {
         sub: ws.folder ? ws.folder.split(/[\\/]/).pop() : ws.removed ? '本地文件夹已清理' : '还没建文件夹',
         done: !!(ws.folder ? (ws.lastWrite || ws.restored) : ws.removed),
@@ -529,6 +533,11 @@ function stepInfo(c) {
   };
 }
 
+// 云端建站的第 3 步叫“开工准备”，本地文件夹的叫“工作环境”
+function stepTitle(s, c) {
+  return s.id === 'workspace' && c.buildMode === 'cloud' && !c.workspace.folder ? '开工准备' : s.title;
+}
+
 function renderMain() {
   const c = state.current;
   if (!c) {
@@ -538,8 +547,8 @@ function renderMain() {
       h('p', null, '帮你和小商家客户一起梳理建站需求、整理给开发者的建站说明、准备项目文档，并记录交付和维护。'),
       h('ul', null,
         h('li', null, '客户信息：名字、负责人、电话、地址、邮箱、费用'),
-        h('li', null, '账号与准备：域名、仓库、托管等账号的准备情况'),
-        h('li', null, '工作环境：复制开工包，贴进客户的 Claude Project，网站在云端的 GitHub 仓库里做'),
+        h('li', null, '客户账号：域名和各平台的账号名（不记密码）'),
+        h('li', null, '开工准备：一步步带你注册账号、建仓库、装 Claude GitHub App、建 Project，再复制开工包'),
         h('li', null, '交付与维护：记录交付，出英文交付报告')),
       h('div', { class: 'toolbar' },
         btn('新建客户', { icon: 'plus', variant: 'primary', onClick: () => document.getElementById('new-client-name').focus() }),
@@ -575,11 +584,11 @@ function renderMain() {
       type: 'button',
       class: info[s.id].done ? 'done' : '',
       'aria-current': state.step === s.id ? 'step' : 'false',
-      'aria-label': `第 ${i + 1} 步，共 4 步：${s.title}，${info[s.id].sub}${info[s.id].done ? '，已完成' : ''}`,
+      'aria-label': `第 ${i + 1} 步，共 4 步：${stepTitle(s, c)}，${info[s.id].sub}${info[s.id].done ? '，已完成' : ''}`,
       on: { click: () => goStep(s.id) },
     },
     h('span', { class: 'num' }, info[s.id].done ? icon('check') : i + 1),
-    h('span', { class: 't' }, s.title),
+    h('span', { class: 't' }, stepTitle(s, c)),
     h('span', { class: 'sub' }, info[s.id].sub))));
 
   const body = h('div', { id: 'step-body' });
@@ -799,10 +808,60 @@ function renderModeSwitch(c, ro) {
       opt('local', '本地文件夹', 'folder')));
 }
 
-// 云端建站：复制开工包 + 开工步骤
+// 云端建站的“开工准备”：一步一张卡片，带直达网页、就地记账号名、自己打勾
 function renderCloudWorkspace(body, c, ro) {
   const ws = c.workspace;
-  const preview = h('textarea', { class: 'code-editor', rows: 14, readonly: true, hidden: true, spellcheck: 'false', 'aria-label': '开工包内容' });
+  const done = (c.setup && c.setup.done) || {};
+  const repo = (c.env.repo || '').trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  const repoOk = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+$/i.test(repo);
+
+  // 账号名就地填，存进第 2 步的账号清单（同一份数据）
+  const pending = {};
+  const envState = h('span', { class: 'save-state', role: 'status' });
+  const saveEnv = debounce(async () => {
+    const body2 = { ...pending };
+    for (const k of Object.keys(pending)) delete pending[k];
+    if (!Object.keys(body2).length) return;
+    const bad = Object.values(body2).map(detectSecret).find(Boolean);
+    if (bad) {
+      envState.textContent = `有疑似${bad.kind}，没有保存。这里只写账号名，不写密码。`;
+      envState.classList.add('error');
+      return;
+    }
+    try {
+      setCurrent(await api('PUT', `/api/clients/${c.id}/env`, body2));
+      envState.textContent = `已保存 ${hhmm(new Date())}`;
+      envState.classList.remove('error');
+    } catch (e) {
+      envState.textContent = e.message;
+      envState.classList.add('error');
+    }
+  }, 700);
+  const field = (k, label, ph, opts = {}) => {
+    const el = h('input', {
+      id: `setup-${k}`, type: 'text', value: c.env[k] || '', disabled: ro, autocomplete: 'off', spellcheck: 'false',
+      maxlength: k === 'repo' ? 500 : 200, placeholder: ph || '', class: 'mono', inputmode: opts.decimal ? 'decimal' : null,
+    });
+    el.addEventListener('input', () => { pending[k] = el.value.trim(); saveEnv(); });
+    // 仓库地址变了要重画，直达按钮才会指向新仓库
+    el.addEventListener('blur', async () => { await saveEnv.flush(); if (k === 'repo' && (c.env.repo || '') !== (state.current.env.repo || '')) renderMain(); });
+    return h('label', { class: 'f-label', for: `setup-${k}` }, h('span', null, label), el);
+  };
+  const link = (url, text) => (safeHref(url)
+    ? h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), text)
+    : null);
+
+  async function setDone(key, v) {
+    try {
+      setCurrent(await api('PUT', `/api/clients/${c.id}/setup`, { step: key, done: v }));
+      renderMain();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  // 开工包
+  const preview = h('textarea', { class: 'code-editor', rows: 12, readonly: true, hidden: true, spellcheck: 'false', 'aria-label': '开工包内容' });
   async function getPack() {
     const r = await api('POST', `/api/clients/${c.id}/starter-pack`, {});
     setCurrent(r.record);
@@ -822,7 +881,6 @@ function renderCloudWorkspace(body, c, ro) {
         preview.select();
         toast('没能自动复制，内容在下面，已全选，按 Cmd+C 复制', 'error');
       }
-      renderMain();
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -835,32 +893,100 @@ function renderCloudWorkspace(body, c, ro) {
       toast(e.message, 'error');
     }
   }
-  const repo = c.env.repo;
-  const steps = h('ol', { class: 'cloud-steps' },
-    h('li', null, '用客户的 GitHub 账号新建一个', h('strong', null, '私有'), '仓库，勾上 “Add a README”。仓库地址填进第 2 步“账号与准备”的主仓库。',
-      repo ? h('span', { class: 'small muted' }, ' 现在填的是：', extLink(repo)) : h('span', { class: 'small muted' }, ' 还没填。')),
-    h('li', null, '在仓库的 Settings → Collaborators 里把你自己的 GitHub 账号加成协作者（第 2 步“我的 GitHub”可以一键复制用户名），再用你的账号接受邀请。'),
-    h('li', null, '还是用客户的账号，打开 ', extLink('https://github.com/apps/claude/installations/select_target', 'Claude GitHub App 安装页'), '，选 “Only select repositories”，勾上这个仓库，点 Install。'),
-    h('li', null, '在 claude.ai 给这个客户新建一个 Project，把仓库加进去。'),
-    h('li', null, '点下面的“复制开工包”，贴进 Project 的第一条消息。录音转文字、截图、图片也传到这个 Project 里。'),
-    h('li', null, '网站做完后，云端 Claude 会写好 docs/handoff.md。照着它在第 4 步填交付信息、出交付报告。报告会写明你的协作者和 Claude App 还有权限，客户可以自己移除。'));
 
-  fill(body,
-    renderModeSwitch(c, ro),
-    notice('', 'info',
-      h('p', null, '网站由云端 Claude 在客户的 GitHub 仓库里做，这台电脑上不建文件夹、不装依赖，交付后也没有本地文件要清理。'),
-      h('p', { class: 'small muted' }, '密码和密钥不要贴进 Project 或仓库，只在 Vercel 网页上填。')),
-    h('div', { class: 'panel' },
-      h('h3', null, '开工步骤'),
-      steps),
-    h('div', { class: 'panel' },
-      h('h3', null, '开工包'),
-      h('p', { class: 'small' }, '一段文字：开头告诉云端 Claude 把建站规则存成仓库里的 CLAUDE.md，后面是填好店名、编号和账号名的建站规则。'),
+  const needRepo = repoOk ? null : h('p', { class: 'small muted' }, '先在第 3 步填好仓库地址，这里的按钮才会直接带你到这个仓库。');
+  const P = (...x) => h('p', null, ...x);
+  const S = (t) => h('strong', null, t);
+  const content = {
+    gmail: () => [
+      P('用客户的店名注册一个新的 Gmail，后面所有平台都用它注册、收验证邮件。密码记在你自己的密码管理器里，不要写在这里。'),
+      h('div', { class: 'toolbar' }, link('https://accounts.google.com/signup', '打开 Gmail 注册')),
+      field('gmail', '客户的 Gmail', '例如 shopname@gmail.com'),
+    ],
+    github: () => [
+      P('用上一步的 Gmail 注册 GitHub。网站代码会放在这个账号下，交付后整个账号交给客户。'),
+      h('div', { class: 'toolbar' }, link('https://github.com/signup', '打开 GitHub 注册')),
+      field('github', '客户的 GitHub 用户名', '例如 shopname'),
+    ],
+    repo: () => [
+      P('用客户的 GitHub 新建一个仓库：选 ', S('Private'), '（私有），勾上 ', S('Add a README'), '（空仓库云端拉不下来）。建好后把浏览器地址栏的网址贴到下面。'),
+      h('div', { class: 'toolbar' }, link('https://github.com/new', '打开新建仓库')),
+      field('repo', '仓库地址', 'https://github.com/客户用户名/仓库名'),
+    ],
+    collab: () => [
+      P('还是用客户的账号：进仓库的 Settings → Collaborators → ', S('Add people'), '，粘贴你自己的 GitHub 用户名。然后换回你的账号接受邀请。'),
+      renderMyGithub(true),
+      needRepo,
+      h('div', { class: 'toolbar' },
+        link(repoOk ? `${repo}/settings/access` : null, '打开这个仓库的协作者设置'),
+        link(repoOk ? `${repo}/invitations` : null, '接受邀请（用你的账号）')),
+    ],
+    app: () => [
+      P('还是用客户的账号：打开安装页，选客户的账号，选 ', S('Only select repositories'), '，只勾这个网站仓库，点 Install。这样云端 Claude 只能进这一个仓库。'),
+      h('div', { class: 'toolbar' }, link('https://github.com/apps/claude/installations/select_target', '打开 Claude GitHub App 安装页')),
+    ],
+    project: () => [
+      P('换回', S('你自己的'), ' claude.ai 账号，给这个客户新建一个 Project，把这个仓库加进去。找不到仓库的话，多半是协作者邀请还没接受。'),
+      h('div', { class: 'toolbar' }, link('https://claude.ai/', '打开 claude.ai')),
+    ],
+    starter: () => [
+      P('复制开工包，贴进 Project 的第一条消息。录音转文字、截图、图片也一起传到这个 Project 里。密码和密钥不要贴进去。'),
       ws.starterAt ? h('p', { class: 'small muted' }, `上次生成 ${fmtTime(ws.starterAt)}。改了规则模板或账号后，再复制一次就是新的。`) : null,
       h('div', { class: 'toolbar' },
         btn('复制开工包', { icon: 'copy', variant: 'primary', disabled: ro, onClick: copyPack }),
         btn('看一下内容', { icon: 'eye', disabled: ro, onClick: showPack })),
-      preview),
+      preview,
+    ],
+    domain: () => [
+      P('网站快做完时，用客户的 Gmail 在域名注册商买域名，打开自动续费。'),
+      h('div', { class: 'grid2' },
+        field('domain', '域名', '例如 example.com'),
+        field('registrar', '注册商和账号名', '例如 Namecheap · shopname')),
+      field('domainPrice', '价格（每年，可不填）', '例如 12.99', { decimal: true }),
+    ],
+    vercel: () => [
+      P('用 “Continue with GitHub” 登录客户的 GitHub 注册 Vercel，再 Add New → Project → 导入这个仓库。以后合并进 main 就自动上线。'),
+      h('div', { class: 'toolbar' }, link('https://vercel.com/signup', '打开 Vercel 注册')),
+      field('vercel', 'Vercel 账号名', '例如 shopname'),
+    ],
+    golive: () => [
+      P('在 Vercel 项目的 Settings → Environment Variables 填密钥（只有用到 Resend、Supabase 等才需要，变量名看 docs/handoff.md）。再到 Settings → Domains 绑定域名。密钥只在这里填，不写进建站助手。'),
+      h('div', { class: 'toolbar' }, link('https://vercel.com/dashboard', '打开 Vercel')),
+      h('div', { class: 'grid2' },
+        field('resend', 'Resend 账号名（不用就空着）', ''),
+        field('supabase', 'Supabase 账号名（不用就空着）', '')),
+    ],
+  };
+
+  const card = (s, n) => {
+    const isDone = !!done[s.key];
+    const cb = h('input', { type: 'checkbox', checked: isDone, disabled: ro, 'aria-label': `第 ${n} 步做完了：${s.title}` });
+    cb.addEventListener('change', () => setDone(s.key, cb.checked));
+    return h('details', { class: `panel setup-card${isDone ? ' done' : ''}`, open: !isDone },
+      h('summary', null,
+        h('span', { class: 'num' }, isDone ? icon('check') : n),
+        h('span', { class: 't' }, s.title),
+        isDone ? h('span', { class: 'small muted' }, `${fmtTime(done[s.key])} 做完`) : null),
+      h('div', { class: 'setup-body' },
+        content[s.key](),
+        h('label', { class: 'setup-done' }, cb, '这一步做完了')));
+  };
+
+  const prog = setupProgress(c.setup);
+  let n = 0;
+  const group = (g, title, hint) => [
+    h('h3', { class: 'setup-group' }, title, h('span', { class: 'en' }, hint)),
+    SETUP_STEPS.filter((s) => s.group === g).map((s) => card(s, ++n)),
+  ];
+
+  fill(body,
+    renderModeSwitch(c, ro),
+    notice('', 'info',
+      h('p', null, `跟着下面一步一步做。网站由云端 Claude 在客户的 GitHub 仓库里做，这台电脑上不建文件夹、不装依赖。已完成 ${prog.done} / ${prog.total}。`),
+      h('p', { class: 'small muted' }, '勾选只是记你自己的进度，建站助手不会登录或检查任何账号。账号名填在这里，会存进第 2 步“客户账号”。')),
+    group('start', '开工前', '做完这 7 步就能开始建站'),
+    group('launch', '上线前', '网站做完再做'),
+    h('div', { class: 'toolbar' }, envState),
     renderRulesTemplate(ro));
 }
 
@@ -1225,7 +1351,7 @@ function renderRepoPanel(c, ro) {
   return panel;
 }
 
-// ---------- 第 2 步：账号与准备 ----------
+// ---------- 第 2 步：客户账号（域名 + 账号清单）----------
 // 固定的账号清单：只填账号名；“你自己核实”是提醒，建站助手查不到这些账号，所以不显示状态。
 const ENV_ROWS = [
   { k: 'gmail', label: 'Gmail', check: '能收验证邮件', en: 'Gmail', use: 'The accounts below are registered with it' },
@@ -1252,7 +1378,7 @@ function renderAccounts(body) {
     if (problem) {
       stateEl.textContent = problem;
       stateEl.classList.add('error');
-      markUnsaved(errKey, `账号与准备：${problem}`);
+      markUnsaved(errKey, `客户账号：${problem}`);
       return;
     }
     beginSave();
@@ -1265,7 +1391,7 @@ function renderAccounts(body) {
     } catch (e) {
       stateEl.textContent = e.message;
       stateEl.classList.add('error');
-      endSave(errKey, `账号与准备：${e.message}`);
+      endSave(errKey, `客户账号：${e.message}`);
     }
   }, 700);
 
@@ -1280,8 +1406,12 @@ function renderAccounts(body) {
     return el;
   };
 
+  // 云端建站：这里只是台账，准备步骤都在第 3 步“开工准备”
+  const cloud = c.buildMode === 'cloud';
   body.replaceChildren(
-    notice('', 'info', h('p', null, '账号由你提前手动准备，客户拥有全部账号、自己付平台费。这里都是你人工填写、自己核实：建站助手查不到这些账号，所以不显示状态，不记密码、不登录任何账号。')),
+    cloud
+      ? notice('', 'info', h('p', null, '客户名下的账号，只记账号名，不记密码。怎么一步步准备这些账号，见第 3 步“开工准备”，在那里填的账号名也会出现在这里。'))
+      : notice('', 'info', h('p', null, '账号由你提前手动准备，客户拥有全部账号、自己付平台费。这里都是你人工填写、自己核实：建站助手查不到这些账号，所以不显示状态，不记密码、不登录任何账号。')),
     h('div', { class: 'panel' },
       h('h3', null, '域名'),
       h('div', { class: 'grid2' },
@@ -1290,22 +1420,22 @@ function renderAccounts(body) {
           h('small', null, '填了，报告写这个数；没填，报告写“$15–30 / 年”。')))),
     h('div', { class: 'panel' },
       h('h3', null, '账号清单', h('span', { class: 'en' }, '都不强制：有什么环境就填什么，留空不挡你建环境，报告和建站规则里也就不写它。')),
-      h('div', { class: 'env-table', role: 'table', 'aria-label': '账号清单' },
+      h('div', { class: `env-table${cloud ? ' plain' : ''}`, role: 'table', 'aria-label': '账号清单' },
         h('div', { class: 'env-row head', role: 'row' },
-          h('span', { role: 'columnheader' }, '账号'), h('span', { role: 'columnheader' }, '账号名'), h('span', { role: 'columnheader' }, '你自己核实')),
+          h('span', { role: 'columnheader' }, '账号'), h('span', { role: 'columnheader' }, '账号名'), cloud ? null : h('span', { role: 'columnheader' }, '你自己核实')),
         ENV_ROWS.map((r) => h('div', { class: 'env-row', role: 'row' },
           h('label', { class: 'env-name', for: `env-${r.k}`, role: 'rowheader' }, r.label),
           h('span', { role: 'cell' }, input(r.k, { ph: r.ph, mono: true })),
-          h('span', { class: 'env-check', role: 'cell' }, r.check)))),
-      h('p', { class: 'small muted', style: 'margin:12px 0 0' }, 'Resend、Supabase 填了，建站规则才写进去；记得在 Vercel 加它们的环境变量。'),
+          cloud ? null : h('span', { class: 'env-check', role: 'cell' }, r.check)))),
+      cloud ? null : h('p', { class: 'small muted', style: 'margin:12px 0 0' }, 'Resend、Supabase 填了，建站规则才写进去；记得在 Vercel 加它们的环境变量。'),
       h('div', { class: 'toolbar', style: 'margin:8px 0 0' }, stateEl)),
-    renderMyGithub(),
+    cloud ? null : renderMyGithub(),
   );
 }
 
 // “我的 GitHub”：存一次、所有客户共用，复制给客户，让客户在主仓库 Settings → Collaborators 里把你加成协作者。
 // 只存在 data/settings.json，不写进客户记录、交付报告和建站规则。
-function renderMyGithub() {
+function renderMyGithub(compact = false) {
   const stateEl = h('span', { class: 'save-state', role: 'status' }, '');
   const input = h('input', {
     id: 'my-github', type: 'text', value: (state.settings && state.settings.myGithub) || '', autocomplete: 'off', spellcheck: 'false',
@@ -1361,6 +1491,12 @@ function renderMyGithub() {
     }
   }
 
+  if (compact) {
+    return h('div', { class: 'f-label' },
+      h('label', { for: 'my-github' }, '你自己的 GitHub 用户名（存一次，所有客户共用）'),
+      h('div', { class: 'new-client' }, input, btn('复制', { icon: 'copy', variant: 'primary', onClick: copy, label: '复制我的 GitHub 用户名' })),
+      stateEl);
+  }
   return h('div', { class: 'panel' },
     h('h3', null, '我的 GitHub', h('span', { class: 'en' }, '给客户加协作者用；存一次，所有客户共用，不写进客户记录和报告')),
     h('div', { class: 'new-client' }, input, btn('复制', { icon: 'copy', variant: 'primary', onClick: copy, label: '复制我的 GitHub 用户名' })),

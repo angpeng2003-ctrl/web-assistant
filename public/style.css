@@ -183,8 +183,20 @@ a { color: var(--primary); }
 .mode-switch { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .mode-switch .seg { margin-bottom: 14px; }
 .mode-switch > span { margin-bottom: 14px; }
-.cloud-steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
-.cloud-steps a { overflow-wrap: anywhere; }
+.env-table.plain .env-row { grid-template-columns: 140px minmax(0, 1fr); }
+.setup-group { margin: 18px 0 10px; }
+.setup-card { padding: 0; }
+.setup-card > summary { display: flex; align-items: center; gap: 10px; padding: 14px 20px; cursor: pointer; list-style: none; }
+.setup-card > summary::-webkit-details-marker { display: none; }
+.setup-card > summary .t { font-weight: 600; flex: 1; }
+.setup-card > summary .num { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--primary-soft); color: var(--primary); font-size: 13px; font-weight: 600; flex: none; }
+.setup-card.done > summary .num { background: var(--ok-soft); color: var(--ok); }
+.setup-card.done > summary .t { color: var(--muted); }
+.setup-body { padding: 0 20px 16px 56px; display: grid; gap: 10px; }
+.setup-body p { margin: 0; }
+.setup-body .toolbar { margin: 0; }
+.setup-done { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; min-height: var(--tap); }
+@media (max-width: 640px) { .setup-body { padding-left: 20px; } .env-table.plain .env-row { grid-template-columns: 1fr; } }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px; }
 .panel h3 { margin: 0 0 12px; font-size: 16px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .panel h3 .en { font-weight: normal; color: var(--muted); font-size: 13px; }
@@ -419,7 +431,7 @@ details.panel > summary { font-weight: 600; color: var(--ink); }
 .report .report-list { margin: 6px 0; padding-left: 1.2em; }
 .report .report-list li { margin: 2px 0; }
 
-/* ---------- 账号与准备：固定账号清单 ---------- */
+/* ---------- 客户账号：固定账号清单 ---------- */
 .env-table { display: grid; }
 .env-row { display: grid; grid-template-columns: 140px minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--line); }
 .env-row.head { border-top: none; color: var(--muted); font-size: 13px; padding-top: 0; }
@@ -434,3 +446,4 @@ input.mono { font-family: var(--mono); font-size: 14px; }
 /* 下载继续修改 */
 .clone-box { border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 14px 16px; margin-top: 12px; background: var(--surface-2); }
 .clone-box h3 { font-size: 15px; }
+.setup-body a.btn { text-decoration: none; }
