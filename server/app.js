@@ -6,6 +6,7 @@ import { checkObject, isRealDate, URL_RE } from './validate.js';
 import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES } from './docs.js';
 import { resolveFolder, planFiles, writeFiles, listDirs, createProjectFolder, resolveDeletableFolder } from './workspace.js';
 import { checkRepo, moveToRecycleBin, removeRegenerable, cloneRepo } from './git.js';
+import { trashName } from '../shared/report.js';
 
 const BODY_LIMIT = 1024 * 1024;
 
@@ -144,7 +145,7 @@ function stamp(now = new Date()) {
 
 /**
  * config: { dataDir, workspaceRoots, appRoot }
- * hooks（测试用）：{ trash(folder) } 代替“移到回收站”
+ * hooks（测试用）：{ trash(folder) } 代替“移到系统回收站 / 废纸篓”
  */
 export function createApp(config, hooks = {}) {
   const store = new Store(config.dataDir);
@@ -434,7 +435,7 @@ export function createApp(config, hooks = {}) {
     } catch {
       stillThere = false;
     }
-    if (stillThere) throw new HttpError(500, '移到回收站后文件夹还在，请手动检查。');
+    if (stillThere) throw new HttpError(500, `移到${trashName(process.platform)}后文件夹还在，请手动检查。`);
     const now = new Date().toISOString();
     const updated = await store.update(m[1], (r) => {
       r.workspace = wsOf(r);
@@ -442,7 +443,7 @@ export function createApp(config, hooks = {}) {
       r.workspace.folder = '';
       r.workspace.lastCheck = { ...check, folder };
       if (check.remote && /^https:\/\//.test(check.remote) && !r.delivery.repoUrl) r.delivery.repoUrl = check.remote.replace(/\.git$/, '');
-    }, { log: `本地文件夹已移到回收站：${path.basename(folder)}（提交 ${check.head}）` });
+    }, { log: `本地文件夹已移到${trashName(process.platform)}：${path.basename(folder)}（提交 ${check.head}）` });
     return { removed: updated.workspace.removed, record: full(updated) };
   });
 

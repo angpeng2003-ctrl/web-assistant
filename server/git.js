@@ -194,22 +194,52 @@ export async function cloneRepo(url, target, { allowAnyRemote = false } = {}) {
   return { head: head.stdout.trim(), branch: br.stdout.trim(), remote: cleanRemote(u) };
 }
 
-/** 默认的删除方式：移到 Windows 回收站（可以找回） */
-export function moveToRecycleBin(target) {
+// Mac 上让 Finder 把文件夹移到废纸篓（能在废纸篓里“放回原处”）。
+// 路径作为参数传给脚本（argv），不拼进脚本字符串。
+const MAC_TRASH_SCRIPT = [
+  'on run argv',
+  'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)',
+  'end run',
+];
+
+/**
+ * 默认的删除方式：移到系统回收站（可以找回）。
+ * Windows：回收站；macOS：废纸篓；其他系统不支持。
+ * opts.platform / opts.exec 只给测试用。
+ */
+export function moveToRecycleBin(target, { platform = process.platform, exec = execFile } = {}) {
   return new Promise((resolve, reject) => {
-    if (!isWin) {
-      reject(new HttpError(501, '目前只支持移到 Windows 回收站。'));
+    if (platform === 'win32') {
+      const ps = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:JZ_TARGET, 'OnlyErrorDialogs', 'SendToRecycleBin')";
+      exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+        timeout: 10 * 60 * 1000,
+        windowsHide: true,
+        env: { ...process.env, JZ_TARGET: target },
+      }, (err, _out, stderr) => {
+        if (err) reject(new HttpError(500, `移到回收站失败：${firstLine(stderr) || err.message}`));
+        else resolve();
+      });
       return;
     }
-    const ps = "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($env:JZ_TARGET, 'OnlyErrorDialogs', 'SendToRecycleBin')";
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-      timeout: 10 * 60 * 1000,
-      windowsHide: true,
-      env: { ...process.env, JZ_TARGET: target },
-    }, (err, _out, stderr) => {
-      if (err) reject(new HttpError(500, `移到回收站失败：${firstLine(stderr) || err.message}`));
-      else resolve();
-    });
+    if (platform === 'darwin') {
+      if (!path.isAbsolute(target)) {
+        reject(new HttpError(400, '要删除的文件夹路径不对。'));
+        return;
+      }
+      const args = MAC_TRASH_SCRIPT.flatMap((line) => ['-e', line]);
+      exec('osascript', [...args, target], { timeout: 10 * 60 * 1000 }, (err, _out, stderr) => {
+        if (!err) {
+          resolve();
+          return;
+        }
+        const msg = firstLine(stderr) || err.message;
+        const hint = /-1743|not authori[sz]ed|不允许/i.test(String(stderr))
+          ? '（需要允许建站助手控制“访达”：系统设置 → 隐私与安全性 → 自动化，打开运行建站助手的终端对“访达”的权限，再试一次）' : '';
+        reject(new HttpError(500, `移到废纸篓失败：${msg}${hint}`));
+      });
+      return;
+    }
+    reject(new HttpError(501, '这个系统不支持移到回收站，目前只支持 Windows 回收站和 Mac 废纸篓。'));
   });
 }
 

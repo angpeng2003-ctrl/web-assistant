@@ -1,6 +1,10 @@
 // 建站助手前端。所有用户输入都用 textContent / value 显示，从不当作 HTML。
 // 交互规范见 docs/design-system.md
 import { detectSecret } from '/shared/secrets.js';
+import { trashName, hasSupport, howToUse } from '/shared/report.js';
+
+// 系统回收站的叫法：Mac 是“废纸篓”，Windows 是“回收站”（侧栏的“回收站”是台账自己的，不用这个）
+const binName = () => trashName(state.config && state.config.platform);
 
 // ---------- 小工具 ----------
 function h(tag, props, ...children) {
@@ -881,7 +885,7 @@ function renderWorkspace(body) {
   if (ws.removed && !ws.folder) {
     const rm = ws.removed;
     parts.push(notice('', 'check',
-      h('p', null, h('strong', null, `本地文件夹已于 ${fmtTime(rm.at)} 移到回收站。`)),
+      h('p', null, h('strong', null, `本地文件夹已于 ${fmtTime(rm.at)} 移到${binName()}。`)),
       h('p', { class: 'small' }, h('span', { class: 'path' }, rm.folder)),
       h('p', { class: 'small' }, `当时的提交 ${rm.head}${rm.branch ? `（${rm.branch} 分支）` : ''}，代码在：`, rm.remote ? extLink(rm.remote) : '（没记下远程地址）'),
       h('p', { class: 'small muted' }, '要继续改网站，就再建一个文件夹，从 GitHub 把代码取回来。')));
@@ -1032,7 +1036,7 @@ function renderRepoPanel(c, ro) {
   if (!ws.folder) {
     if (ws.removed) {
       panel.append(notice('', 'check',
-        h('p', null, `本地文件夹已于 ${fmtTime(ws.removed.at)} 移到回收站（提交 ${ws.removed.head}）。`),
+        h('p', null, `本地文件夹已于 ${fmtTime(ws.removed.at)} 移到${binName()}（提交 ${ws.removed.head}）。`),
         h('p', { class: 'small' }, '代码在：', ws.removed.remote ? extLink(ws.removed.remote) : '（没记下远程地址）')));
     } else {
       panel.append(h('p', { class: 'muted' }, '还没有关联项目文件夹。先在“工作环境”里建一个或选一个；代码已经在 GitHub 上的，也可以直接下载。'));
@@ -1063,13 +1067,13 @@ function renderRepoPanel(c, ro) {
     const base = ws.folder.split(/[\\/]/).pop();
     const localOnly = (lc && lc.localOnly) || [];
     const value = await openDialog({
-      title: '把本地文件夹移到回收站？',
+      title: `把本地文件夹移到${binName()}？`,
       iconName: 'trash',
       danger: true,
       body: [
         `位置：${ws.folder}`,
         '删除前会当场再检查一次 GitHub，不通过就不删。',
-        'node_modules、.next 这类能重新安装或生成的直接删除；其余整个文件夹移到 Windows 回收站，需要时可以还原。',
+        `node_modules、.next 这类能重新安装或生成的直接删除；其余整个文件夹移到${binName()}，需要时可以还原。`,
       ],
       extra: localOnly.length ? h('div', { class: 'dlg-list' },
         h('p', null, h('strong', null, `下面 ${localOnly.length} 项没上传到 GitHub，会一起被删：`)),
@@ -1077,7 +1081,7 @@ function renderRepoPanel(c, ro) {
       check: localOnly.length ? `我知道这 ${localOnly.length} 项只在本地，会一起删掉` : null,
       input: { label: `输入文件夹名“${base}”确认`, value: '', placeholder: base, max: 200 },
       requireText: base,
-      confirmText: '移到回收站',
+      confirmText: `移到${binName()}`,
     });
     if (value == null) return;
     removeBtn.disabled = true;
@@ -1085,7 +1089,7 @@ function renderRepoPanel(c, ro) {
     try {
       const r = await api('POST', `/api/clients/${c.id}/repo/remove`, { confirmName: value, ackLocalOnly: localOnly.length > 0 });
       setCurrent(r.record);
-      toast('本地文件夹已移到回收站', 'ok');
+      toast(`本地文件夹已移到${binName()}`, 'ok');
     } catch (e) {
       if (e.data && e.data.check) {
         try {
@@ -1207,7 +1211,7 @@ function renderDelivery(body) {
     scope: d.scope || '',
     customerKeeps: d.customerKeeps || '',
     maintenanceMethod: d.maintenanceMethod || '',
-    warrantyDays: d.warrantyDays ?? 30,
+    warrantyDays: d.warrantyDays ?? 0,
     platforms: (d.platforms || []).map((p) => ({ ...p })),
     price: d.price || '',
     paymentTerms: d.paymentTerms || '',
@@ -1359,7 +1363,7 @@ function renderDelivery(body) {
     h('dl', { class: 'kv' },
       h('dt', null, '状态'), h('dd', null, c.status === 'delivered' ? '已交付' : '进行中'),
       h('dt', null, '首次交付日期（售后起算日）'), h('dd', null, d.firstDeliveredAt || '还没交付'),
-      h('dt', null, '售后期限'), h('dd', null, d.firstDeliveredAt ? `${d.warrantyDays} 天，到 ${c.computed.warrantyEnd} 为止` : `${d.warrantyDays} 天（从首次交付起算）`)),
+      h('dt', null, '售后期限'), h('dd', null, !hasSupport(d) ? '不含售后（报告里不显示 Support）' : d.firstDeliveredAt ? `${d.warrantyDays} 天，到 ${c.computed.warrantyEnd} 为止` : `${d.warrantyDays} 天（从首次交付起算）`)),
     h('div', { class: 'toolbar', style: 'margin-top:10px' },
       h('label', { class: 'small' }, '交付日期 ', dateInput),
       noteInput,
@@ -1380,7 +1384,7 @@ function renderDelivery(body) {
       field('siteName', '网站名称', { ph: c.name }),
       field('siteUrl', '网址（线上地址）', { type: 'url', ph: 'https://' }),
       field('repoUrl', '代码仓库地址', { type: 'url', ph: 'https://github.com/...' }),
-      field('warrantyDays', '售后天数', { type: 'number', min: 0, max: 5 }),
+      field('warrantyDays', '售后天数（0 = 不含售后）', { type: 'number', min: 0, max: 5 }),
       scopeField,
       field('customerKeeps', '由客户自行保管的事项', { multiline: true, full: true, ph: '例如：域名注册商账号和密码、托管平台账号、邮箱登录——都由客户本人保管，我们不保存任何密码' }),
       field('maintenanceMethod', '后续维护方式', { multiline: true, full: true, ph: '例如：售后期内修复缺陷免费；新需求另行报价；通过微信或邮件联系' }),
@@ -1496,6 +1500,7 @@ function openReport(c) {
   const today = new Date();
   const todayStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const verified = platforms.filter((p) => p.sourceUrl && p.verifiedOn).map((p) => p.verifiedOn).sort();
+  const support = hasSupport(d);
 
   const report = h('article', { class: 'report', lang: 'en' },
     h('header', { class: 'report-head' },
@@ -1525,14 +1530,23 @@ function openReport(c) {
       : h('p', null, blank('No accounts recorded yet')),
     h('p', { class: 'small' }, d.customerKeeps || 'Passwords are handed over separately. Please change them right away and turn on two-step verification.'),
 
-    h('h2', null, 'Support'),
+    h('h2', null, 'How to use your website'),
     kv(
-      ['Starts', d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : blank('(the day the website is delivered)')],
-      ['Ends', d.firstDeliveredAt ? `${dateEn(c.computed.warrantyEnd)} (${d.warrantyDays} days)` : blank(`(${d.warrantyDays} days after the start date)`)],
-      ['Covers', 'Free fixes for defects in features delivered'],
-      ['Not covered', 'New features, content changes, changes made by the platforms themselves, renewals'],
-      d.maintenanceMethod ? ['How to reach us', h('span', { class: 'pre' }, d.maintenanceMethod)] : null,
+      ...howToUse(c).map((x) => [x.label, x.text]),
+      !support && d.maintenanceMethod ? ['How to reach us', h('span', { class: 'pre' }, d.maintenanceMethod)] : null,
     ),
+
+    // 售后天数为 0 时不显示 Support，只保留上面“不含维护”的说明
+    support ? [
+      h('h2', null, 'Support'),
+      kv(
+        ['Starts', d.firstDeliveredAt ? dateEn(d.firstDeliveredAt) : blank('(the day the website is delivered)')],
+        ['Ends', d.firstDeliveredAt ? `${dateEn(c.computed.warrantyEnd)} (${d.warrantyDays} days)` : blank(`(${d.warrantyDays} days after the start date)`)],
+        ['Covers', 'Free fixes for defects in features delivered'],
+        ['Not covered', 'New features, content changes, changes made by the platforms themselves, renewals'],
+        d.maintenanceMethod ? ['How to reach us', h('span', { class: 'pre' }, d.maintenanceMethod)] : null,
+      ),
+    ] : null,
 
     (d.price || d.paymentTerms) ? [
       h('h2', null, 'Price and payment'),
