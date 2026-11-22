@@ -799,3 +799,29 @@ test('22. 开工准备：自己打勾记进度，只认固定的步骤；进度�
     await s.close();
   }
 });
+
+test('23. 白天 / 夜间配色：theme.js 先于页面套上配色，默认跟随系统，顶栏按钮切换并记住', async () => {
+  const s = await startServer();
+  try {
+    const page = await s.call('GET', '/');
+    const html = typeof page.data === 'string' ? page.data : await fs.readFile(path.join(APP_ROOT, 'public', 'index.html'), 'utf8');
+    // 普通脚本放在 head 里、在 app.js 前面，页面画出来之前就生效
+    const head = html.slice(0, html.indexOf('</head>'));
+    assert.ok(head.indexOf('/theme.js') > -1 && head.indexOf('/theme.js') < head.indexOf('/app.js'));
+    assert.doesNotMatch(head, /<script>/);
+    const theme = await s.call('GET', '/theme.js');
+    assert.equal(theme.status, 200);
+  } finally {
+    await s.close();
+  }
+  const js = await fs.readFile(path.join(APP_ROOT, 'public', 'theme.js'), 'utf8');
+  assert.match(js, /prefers-color-scheme: dark/);
+  assert.match(js, /localStorage/);
+  const css = await fs.readFile(path.join(APP_ROOT, 'public', 'style.css'), 'utf8');
+  // 深色只有一套，由 data-theme 决定，不再直接跟媒体查询
+  assert.match(css, /:root\[data-theme="dark"\]/);
+  assert.doesNotMatch(css, /@media \(prefers-color-scheme/);
+  const ui = await fs.readFile(path.join(APP_ROOT, 'public', 'app.js'), 'utf8');
+  assert.match(ui, /theme-toggle/);
+  assert.match(ui, /切换到夜间配色/);
+});

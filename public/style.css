@@ -1,5 +1,6 @@
 /* 建站助手样式。设计规范见 docs/design-system.md
-   布局：顶栏 + 左侧台账 + 右侧四步流程；颜色全部用下面的变量，浅色深色各一套 */
+   布局：顶栏 + 左侧台账 + 右侧四步流程；颜色全部用下面的变量，白天（浅色）夜间（深色）各一套。
+   用哪套由 <html data-theme> 决定，theme.js 在页面画出来之前设好：没选过跟随系统，顶栏按钮切换 */
 :root {
   --bg: #f5f8f7;
   --surface: #ffffff;
@@ -36,33 +37,31 @@
   color: var(--ink);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1716;
-    --surface: #16211f;
-    --surface-2: #1a2725;
-    --ink: #e3eeeb;
-    --muted: #9db0ab;
-    --line: #2a3a37;
-    --line-strong: #3b504c;
-    --primary: #3fb8a6;
-    --primary-hover: #5ccabb;
-    --on-primary: #05201c;
-    --primary-soft: #183530;
-    --accent: #fb8c5a;
-    --accent-soft: #3a2418;
-    --ok: #5fd08a;
-    --ok-soft: #173023;
-    --warn: #f2c063;
-    --warn-soft: #352b14;
-    --danger: #f97066;
-    --danger-soft: #3a1c1a;
-    --topbar: #0a1110;
-    --on-topbar: #e3eeeb;
-    --on-topbar-muted: #8fa6a1;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #0f1716;
+  --surface: #16211f;
+  --surface-2: #1a2725;
+  --ink: #e3eeeb;
+  --muted: #9db0ab;
+  --line: #2a3a37;
+  --line-strong: #3b504c;
+  --primary: #3fb8a6;
+  --primary-hover: #5ccabb;
+  --on-primary: #05201c;
+  --primary-soft: #183530;
+  --accent: #fb8c5a;
+  --accent-soft: #3a2418;
+  --ok: #5fd08a;
+  --ok-soft: #173023;
+  --warn: #f2c063;
+  --warn-soft: #352b14;
+  --danger: #f97066;
+  --danger-soft: #3a1c1a;
+  --topbar: #0a1110;
+  --on-topbar: #e3eeeb;
+  --on-topbar-muted: #8fa6a1;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
 }
 
 @media (pointer: coarse) {
@@ -104,6 +103,13 @@ a { color: var(--primary); }
 .save-indicator .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .customer-bar { display: none; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--on-topbar-muted);
+  border: 1px solid var(--on-topbar-muted); background: none; padding: 4px 12px; border-radius: 999px;
+  min-height: var(--tap); white-space: nowrap; transition: color var(--ease), border-color var(--ease);
+}
+.theme-toggle:hover { color: var(--on-topbar); border-color: var(--on-topbar); }
+.topbar .theme-toggle:focus-visible { outline-color: var(--on-topbar); }
 .topbar .btn { color: var(--ink); }
 
 .layout { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: calc(100vh - 52px); }
