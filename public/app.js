@@ -65,6 +65,8 @@ const ICONS = {
   save: ['M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z', 'M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7', 'M7 3v4a1 1 0 0 0 1 1h7'],
   site: ['M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0', 'M2 12h20', 'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'],
   send: ['m22 2-7 20-4-9-9-4Z', 'M22 2 11 13'],
+  sun: ['M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0', 'M12 2v2', 'M12 20v2', 'm4.93 4.93 1.41 1.41', 'm17.66 17.66 1.41 1.41', 'M2 12h2', 'M20 12h2', 'm6.34 17.66-1.41 1.41', 'm19.07 4.93-1.41 1.41'],
+  moon: ['M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'],
 };
 const SVGNS = 'http://www.w3.org/2000/svg';
 function icon(name, cls = '') {
@@ -358,10 +360,28 @@ function renderShell() {
     h('span', { class: 'spacer' }),
     saveEl,
     h('span', { class: 'data-hint', title: `数据位置：${state.config.dataDir}` }, `数据：${state.config.dataDir}`),
+    themeToggle(),
   );
   sidebarEl = h('aside', { class: 'sidebar', 'aria-label': '客户网站台账' });
   mainEl = h('main', { class: 'main', id: 'main' });
   app.append(top, h('div', { class: 'layout' }, sidebarEl, mainEl));
+}
+
+// 白天 / 夜间配色切换：按钮显示要切到的那一套。配色逻辑在 theme.js（页面画出来之前就要生效）
+function themeToggle() {
+  const t = window.jzTheme;
+  if (!t) return null;
+  const b = h('button', { type: 'button', class: 'theme-toggle', on: { click: () => t.toggle() } });
+  const paint = (theme) => {
+    const toNight = theme !== 'dark';
+    const text = toNight ? '夜间' : '白天';
+    b.replaceChildren(icon(toNight ? 'moon' : 'sun'), text);
+    b.title = toNight ? '切换到夜间配色' : '切换到白天配色';
+    b.setAttribute('aria-label', b.title);
+  };
+  paint(t.current());
+  t.onChange(paint);
+  return b;
 }
 
 // ---------- 左侧台账 ----------
