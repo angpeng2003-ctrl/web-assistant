@@ -238,6 +238,7 @@ function debounce(fn, ms) {
 // ---------- 状态 ----------
 const state = {
   config: null,
+  settings: { myGithub: '' },
   view: 'active',
   search: '',
   clients: [],
@@ -1195,7 +1196,73 @@ function renderAccounts(body) {
           h('span', { class: 'env-check', role: 'cell' }, r.check)))),
       h('p', { class: 'small muted', style: 'margin:12px 0 0' }, 'Resend、Supabase 填了，建站规则才写进去；记得在 Vercel 加它们的环境变量。'),
       h('div', { class: 'toolbar', style: 'margin:8px 0 0' }, stateEl)),
+    renderMyGithub(),
   );
+}
+
+// “我的 GitHub”：存一次、所有客户共用，复制给客户，让客户在主仓库 Settings → Collaborators 里把你加成协作者。
+// 只存在 data/settings.json，不写进客户记录、交付报告和建站规则。
+function renderMyGithub() {
+  const stateEl = h('span', { class: 'save-state', role: 'status' }, '');
+  const input = h('input', {
+    id: 'my-github', type: 'text', value: (state.settings && state.settings.myGithub) || '', autocomplete: 'off', spellcheck: 'false',
+    maxlength: 100, placeholder: '你的 GitHub 用户名，例如 your-name', class: 'mono',
+  });
+  // 允许直接粘贴 @用户名 或 https://github.com/用户名
+  const clean = (v) => v.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/^@/, '').replace(/\/.*$/, '');
+  const save = debounce(async () => {
+    const v = clean(input.value);
+    if (v && !/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(v)) {
+      stateEl.textContent = 'GitHub 用户名只能有字母、数字和单个连字符，没有保存';
+      stateEl.classList.add('error');
+      return;
+    }
+    if (v === ((state.settings && state.settings.myGithub) || '')) return;
+    stateEl.textContent = '正在保存…';
+    try {
+      state.settings = await api('PUT', '/api/settings', { myGithub: v });
+      if (input.value !== v) input.value = v;
+      stateEl.textContent = `已保存 ${hhmm(new Date())}，所有客户共用`;
+      stateEl.classList.remove('error');
+    } catch (e) {
+      stateEl.textContent = e.message;
+      stateEl.classList.add('error');
+    }
+  }, 700);
+  input.addEventListener('input', () => save());
+  input.addEventListener('blur', () => save.flush());
+
+  async function copy() {
+    await save.flush();
+    const v = clean(input.value);
+    if (!v) {
+      toast('先填上你的 GitHub 用户名', 'error');
+      input.focus();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(v);
+      toast(`已复制：${v}`, 'ok');
+    } catch {
+      // 有的内置浏览器不让网页写剪贴板：先选中文字用旧办法复制，还不行就让用户自己按复制
+      input.focus();
+      input.select();
+      let ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      if (ok) toast(`已复制：${v}`, 'ok');
+      else toast('没法自动复制，已经选中了，按 Cmd+C（Windows 按 Ctrl+C）复制', 'error');
+    }
+  }
+
+  return h('div', { class: 'panel' },
+    h('h3', null, '我的 GitHub', h('span', { class: 'en' }, '给客户加协作者用；存一次，所有客户共用，不写进客户记录和报告')),
+    h('div', { class: 'new-client' }, input, btn('复制', { icon: 'copy', variant: 'primary', onClick: copy, label: '复制我的 GitHub 用户名' })),
+    h('p', { class: 'small muted', style: 'margin:8px 0 0' }, '复制后发给客户：让客户在主仓库的 Settings → Collaborators → Add people 里粘贴，把你加成协作者，你接受邀请后就能推送代码。'),
+    h('div', { class: 'toolbar', style: 'margin:4px 0 0' }, stateEl));
 }
 
 // ---------- 第 4 步：交付与维护 ----------
@@ -1594,6 +1661,7 @@ function openReport(c) {
 async function boot() {
   try {
     state.config = await api('GET', '/api/config');
+    state.settings = await api('GET', '/api/settings');
   } catch (e) {
     app.replaceChildren(h('p', { class: 'boot' }, e.message));
     return;

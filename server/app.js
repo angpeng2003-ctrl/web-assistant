@@ -1,7 +1,7 @@
 // HTTP 服务：本机网页界面 + JSON 接口。只监听 127.0.0.1。
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Store, HttpError } from './store.js';
+import { Store, HttpError, atomicWrite } from './store.js';
 import { checkObject, isRealDate, URL_RE } from './validate.js';
 import { workspaceDocs, readRulesTemplate, writeRulesTemplate, DEFAULT_RULES } from './docs.js';
 import { resolveFolder, planFiles, writeFiles, listDirs, createProjectFolder, resolveDeletableFolder } from './workspace.js';
@@ -9,6 +9,20 @@ import { checkRepo, moveToRecycleBin, removeRegenerable, cloneRepo } from './git
 import { trashName } from '../shared/report.js';
 
 const BODY_LIMIT = 1024 * 1024;
+
+// 我的设置（所有客户共用，存在 data/settings.json）：现在只有“我的 GitHub 用户名”，给客户加仓库协作者用。
+// GitHub 用户名：字母数字和单个连字符，不能以连字符开头或结尾，最多 39 个字符
+export const GITHUB_USER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+const DEFAULT_SETTINGS = { myGithub: '' };
+
+async function readSettings(dataDir) {
+  try {
+    const raw = JSON.parse(await fs.readFile(path.join(dataDir, 'settings.json'), 'utf8'));
+    return { ...DEFAULT_SETTINGS, myGithub: typeof raw.myGithub === 'string' ? raw.myGithub : '' };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
 
 export const MAINT_CATEGORIES = ['缺陷修复', '新需求', '账号或密码相关协助', '其他'];
 export const MAINT_STATUSES = ['待处理', '处理中', '已完成', '不处理'];
@@ -198,6 +212,13 @@ export function createApp(config, hooks = {}) {
     platform: process.platform,
   }));
   route('GET', '/api/fs/list', async ({ url }) => listDirs(url.searchParams.get('path') || '', config.workspaceRoots, excludes));
+  route('GET', '/api/settings', async () => readSettings(config.dataDir));
+  route('PUT', '/api/settings', async ({ body }) => {
+    const b = checkObject(body, { myGithub: { type: 'string', max: 39, pattern: GITHUB_USER_RE, optional: true } }, '我的设置');
+    const next = { ...(await readSettings(config.dataDir)), ...b };
+    await atomicWrite(path.join(config.dataDir, 'settings.json'), JSON.stringify(next, null, 2));
+    return next;
+  });
   route('GET', '/api/rules-template', async () => ({ ...(await readRulesTemplate(config.dataDir)), defaultText: DEFAULT_RULES }));
   route('PUT', '/api/rules-template', async ({ body }) => {
     const b = checkObject(body, { text: { type: 'string', max: 50000 } }, '规则模板');
