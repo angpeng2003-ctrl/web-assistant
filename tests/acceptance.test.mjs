@@ -718,3 +718,41 @@ test('20. 交付报告 Developer access：只对云端客户，写明协作者�
     await s.close();
   }
 });
+
+test('21. 我的 GitHub：存一次所有客户共用，只记用户名，不写进客户记录和建站规则', async () => {
+  const dataDir = await tempDir();
+  let s = await startServer({ dataDir });
+  try {
+    assert.deepEqual((await s.call('GET', '/api/settings')).data, { myGithub: '' });
+    let r = await s.call('PUT', '/api/settings', { myGithub: 'dev-name' });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.myGithub, 'dev-name');
+    // 用户名格式不对、未知字段、疑似密钥、太长：都不保存
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: '-bad' })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'a b' })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'x'.repeat(40) })).status, 400);
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'dev', token: 'x' })).status, 400);
+    assert.notEqual((await s.call('PUT', '/api/settings', { myGithub: 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })).status, 200);
+    // 只认本机页面发来的修改
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: 'evil' }, { origin: 'https://evil.example' })).status, 403);
+    // 可以清空
+    assert.equal((await s.call('PUT', '/api/settings', { myGithub: '' })).data.myGithub, '');
+    await s.call('PUT', '/api/settings', { myGithub: 'dev-name' });
+    // 新客户的记录和建站规则里都没有
+    const { id } = (await s.call('POST', '/api/clients', { name: '子店' })).data;
+    const rec = (await s.call('GET', `/api/clients/${id}`)).data;
+    assert.ok(!JSON.stringify(rec).includes('dev-name'));
+    assert.equal(rec.env.github, '');
+    const docs = await s.call('POST', `/api/clients/${id}/workspace/plan`, { folder: path.join(s.roots[0], 'zi-site'), create: true });
+    assert.ok(!JSON.stringify(docs.data).includes('dev-name'));
+  } finally {
+    await s.close();
+  }
+  // 重启后还在
+  s = await startServer({ dataDir });
+  try {
+    assert.equal((await s.call('GET', '/api/settings')).data.myGithub, 'dev-name');
+  } finally {
+    await s.close();
+  }
+});
