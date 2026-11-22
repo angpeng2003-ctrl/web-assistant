@@ -180,6 +180,11 @@ a { color: var(--primary); }
 .seg button:hover { color: var(--ink); }
 .seg button[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 
+.mode-switch { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.mode-switch .seg { margin-bottom: 14px; }
+.mode-switch > span { margin-bottom: 14px; }
+.cloud-steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.cloud-steps a { overflow-wrap: anywhere; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px; }
 .panel h3 { margin: 0 0 12px; font-size: 16px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .panel h3 .en { font-weight: normal; color: var(--muted); font-size: 13px; }

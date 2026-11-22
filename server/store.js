@@ -47,10 +47,11 @@ export function newClientRecord(id, name, now) {
     status: 'active', // active 进行中 | delivered 已交付
     archivedAt: null,
     trashedAt: null,
+    buildMode: 'cloud', // cloud 云端建站（新客户默认）| local 本地文件夹（老客户没有这个字段，按 local 算）
     liveUrl: '',
     info: { contact: '', phone: '', address: '', email: '', fee: '' },
     env: { domain: '', domainPrice: '', gmail: '', github: '', repo: '', vercel: '', registrar: '', resend: '', supabase: '' },
-    workspace: { folder: '', lastWrite: null, lastCheck: null, removed: null },
+    workspace: { folder: '', lastWrite: null, lastCheck: null, removed: null, starterAt: null },
     delivery: {
       siteName: '',
       siteUrl: '',

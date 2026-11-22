@@ -1,7 +1,7 @@
 // 建站助手前端。所有用户输入都用 textContent / value 显示，从不当作 HTML。
 // 交互规范见 docs/design-system.md
 import { detectSecret } from '/shared/secrets.js';
-import { trashName, hasSupport, howToUse } from '/shared/report.js';
+import { trashName, hasSupport, howToUse, developerAccess } from '/shared/report.js';
 
 // 系统回收站的叫法：Mac 是“废纸篓”，Windows 是“回收站”（侧栏的“回收站”是台账自己的，不用这个）
 const binName = () => trashName(state.config && state.config.platform);
@@ -516,12 +516,14 @@ function stepInfo(c) {
       done: infoFilled >= 2,
     },
     accounts: { sub: c.env.domain ? `${c.env.domain} · 已填 ${filled}/${core.length}` : `已填 ${filled}/${core.length}`, done: filled === core.length },
-    workspace: {
-      sub: ws.folder ? ws.folder.split(/[\\/]/).pop() : ws.removed ? '本地文件夹已清理' : '还没建文件夹',
-      done: !!(ws.folder ? (ws.lastWrite || ws.restored) : ws.removed),
-    },
+    workspace: c.buildMode === 'cloud' && !ws.folder
+      ? { sub: ws.starterAt ? '云端建站 · 开工包已生成' : '云端建站 · 还没拿开工包', done: !!ws.starterAt }
+      : {
+        sub: ws.folder ? ws.folder.split(/[\\/]/).pop() : ws.removed ? '本地文件夹已清理' : '还没建文件夹',
+        done: !!(ws.folder ? (ws.lastWrite || ws.restored) : ws.removed),
+      },
     delivery: {
-      sub: ws.removed && !ws.folder ? `已交付 · 本地已清理` : c.delivery.firstDeliveredAt ? `首次交付 ${c.delivery.firstDeliveredAt}` : '还没交付',
+      sub: c.buildMode === 'local' && ws.removed && !ws.folder ? `已交付 · 本地已清理` : c.delivery.firstDeliveredAt ? `首次交付 ${c.delivery.firstDeliveredAt}` : '还没交付',
       done: !!c.delivery.firstDeliveredAt,
     },
   };
@@ -537,13 +539,13 @@ function renderMain() {
       h('ul', null,
         h('li', null, '客户信息：名字、负责人、电话、地址、邮箱、费用'),
         h('li', null, '账号与准备：域名、仓库、托管等账号的准备情况'),
-        h('li', null, '工作环境：一键建项目文件夹，写好建站规则'),
-        h('li', null, '交付与维护：记录交付，检查代码都传到 GitHub 后清理本地文件夹')),
+        h('li', null, '工作环境：复制开工包，贴进客户的 Claude Project，网站在云端的 GitHub 仓库里做'),
+        h('li', null, '交付与维护：记录交付，出英文交付报告')),
       h('div', { class: 'toolbar' },
         btn('新建客户', { icon: 'plus', variant: 'primary', onClick: () => document.getElementById('new-client-name').focus() }),
         state.clients.length ? h('span', { class: 'muted small' }, '或者在左边选一个客户') : null),
       h('p', { class: 'muted small' }, `数据都存在这台电脑上：${state.config.dataDir}。备份就是复制这个文件夹。`),
-      h('p', { class: 'muted small' }, '这个工具不写网站代码、不运行客户网站、不提交也不推送代码；Git 只用来检查上传情况。'),
+      h('p', { class: 'muted small' }, '这个工具不写网站代码、不运行客户网站、不提交也不推送代码。网站由云端 Claude 在客户的 GitHub 仓库里做，这台电脑上不用装网站的依赖。'),
     ));
     return;
   }
@@ -763,10 +765,110 @@ function safeFolderName(name) {
   return String(name || '').replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 80) || '新客户';
 }
 
+// 建站方式切换：云端（新客户默认）/ 本地文件夹（老客户）
+function renderModeSwitch(c, ro) {
+  async function setMode(mode) {
+    if (mode === c.buildMode) return;
+    const toCloud = mode === 'cloud';
+    const ok = await confirmDialog({
+      title: toCloud ? '改成云端建站？' : '改成本地文件夹？',
+      iconName: toCloud ? 'site' : 'folder',
+      body: toCloud
+        ? ['网站在客户的 GitHub 仓库里由云端 Claude 做，这一步改成复制开工包。', c.workspace.folder ? '已经关联的本地文件夹不动，交付后照样可以在第 4 步检查上传和清理。' : '这台电脑上不用建文件夹。']
+        : ['这一步改回在这台电脑上建项目文件夹、写建站规则；交付后要检查上传再清理本地文件夹。'],
+      confirmText: '改',
+    });
+    if (!ok) return;
+    try {
+      setCurrent(await api('PATCH', `/api/clients/${c.id}`, { buildMode: mode }));
+      renderMain();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+  const opt = (mode, text, iconName) => h('button', {
+    type: 'button',
+    'aria-pressed': c.buildMode === mode ? 'true' : 'false',
+    disabled: ro,
+    on: { click: () => setMode(mode) },
+  }, icon(iconName), text);
+  return h('div', { class: 'mode-switch' },
+    h('span', { class: 'small muted' }, '建站方式'),
+    h('div', { class: 'seg', role: 'group', 'aria-label': '建站方式' },
+      opt('cloud', '云端建站', 'site'),
+      opt('local', '本地文件夹', 'folder')));
+}
+
+// 云端建站：复制开工包 + 开工步骤
+function renderCloudWorkspace(body, c, ro) {
+  const ws = c.workspace;
+  const preview = h('textarea', { class: 'code-editor', rows: 14, readonly: true, hidden: true, spellcheck: 'false', 'aria-label': '开工包内容' });
+  async function getPack() {
+    const r = await api('POST', `/api/clients/${c.id}/starter-pack`, {});
+    setCurrent(r.record);
+    return r.text;
+  }
+  async function copyPack() {
+    try {
+      const text = await getPack();
+      preview.value = text;
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('开工包已复制，贴进客户 Project 的第一条消息', 'ok');
+      } catch {
+        // 内置浏览器可能不让写剪贴板：显示出来让用户自己全选复制
+        preview.hidden = false;
+        preview.focus();
+        preview.select();
+        toast('没能自动复制，内容在下面，已全选，按 Cmd+C 复制', 'error');
+      }
+      renderMain();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+  async function showPack() {
+    try {
+      preview.value = await getPack();
+      preview.hidden = false;
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+  const repo = c.env.repo;
+  const steps = h('ol', { class: 'cloud-steps' },
+    h('li', null, '用客户的 GitHub 账号新建一个', h('strong', null, '私有'), '仓库，勾上 “Add a README”。仓库地址填进第 2 步“账号与准备”的主仓库。',
+      repo ? h('span', { class: 'small muted' }, ' 现在填的是：', extLink(repo)) : h('span', { class: 'small muted' }, ' 还没填。')),
+    h('li', null, '在仓库的 Settings → Collaborators 里把你自己的 GitHub 账号加成协作者（第 2 步“我的 GitHub”可以一键复制用户名），再用你的账号接受邀请。'),
+    h('li', null, '还是用客户的账号，打开 ', extLink('https://github.com/apps/claude/installations/select_target', 'Claude GitHub App 安装页'), '，选 “Only select repositories”，勾上这个仓库，点 Install。'),
+    h('li', null, '在 claude.ai 给这个客户新建一个 Project，把仓库加进去。'),
+    h('li', null, '点下面的“复制开工包”，贴进 Project 的第一条消息。录音转文字、截图、图片也传到这个 Project 里。'),
+    h('li', null, '网站做完后，云端 Claude 会写好 docs/handoff.md。照着它在第 4 步填交付信息、出交付报告。报告会写明你的协作者和 Claude App 还有权限，客户可以自己移除。'));
+
+  fill(body,
+    renderModeSwitch(c, ro),
+    notice('', 'info',
+      h('p', null, '网站由云端 Claude 在客户的 GitHub 仓库里做，这台电脑上不建文件夹、不装依赖，交付后也没有本地文件要清理。'),
+      h('p', { class: 'small muted' }, '密码和密钥不要贴进 Project 或仓库，只在 Vercel 网页上填。')),
+    h('div', { class: 'panel' },
+      h('h3', null, '开工步骤'),
+      steps),
+    h('div', { class: 'panel' },
+      h('h3', null, '开工包'),
+      h('p', { class: 'small' }, '一段文字：开头告诉云端 Claude 把建站规则存成仓库里的 CLAUDE.md，后面是填好店名、编号和账号名的建站规则。'),
+      ws.starterAt ? h('p', { class: 'small muted' }, `上次生成 ${fmtTime(ws.starterAt)}。改了规则模板或账号后，再复制一次就是新的。`) : null,
+      h('div', { class: 'toolbar' },
+        btn('复制开工包', { icon: 'copy', variant: 'primary', disabled: ro, onClick: copyPack }),
+        btn('看一下内容', { icon: 'eye', disabled: ro, onClick: showPack })),
+      preview),
+    renderRulesTemplate(ro));
+}
+
 function renderWorkspace(body) {
   const c = state.current;
   const ro = inactive();
   const ws = c.workspace;
+  if (c.buildMode === 'cloud' && !ws.folder) return renderCloudWorkspace(body, c, ro);
   const planBox = h('div');
   const resultBox = h('div');
 
@@ -878,6 +980,7 @@ function renderWorkspace(body) {
   }
 
   const parts = [
+    renderModeSwitch(c, ro),
     notice('', 'info',
       h('p', null, '一键建好项目文件夹，写入 ', h('strong', null, 'CLAUDE.md'), '（建站规则，要求先用 UI UX Pro Max 定设计）。'),
       h('p', null, '之后用 Claude Code 打开这个文件夹开工。建站助手不运行网站代码、不安装依赖、不提交也不推送代码。')),
@@ -1469,7 +1572,9 @@ function renderDelivery(body) {
     h('div', { style: 'margin-top:10px' }, btn('加一个平台', { icon: 'plus', disabled: ro, onClick: () => { form.platforms.push({ name: '', purpose: '', cost: '', sourceUrl: '', verifiedOn: '' }); drawPlatforms(); const ins = platBox.querySelectorAll('.row-card:last-child input'); if (ins[0]) ins[0].focus(); } })),
   );
 
-  body.replaceChildren(statusPanel, renderRepoPanel(c, ro), infoPanel, renderMaintenance(c, ro), renderLog(c));
+  // 云端建站的客户没有本地文件夹，不需要上传检查和清理
+  const repoPanel = c.buildMode === 'cloud' && !c.workspace.folder ? null : renderRepoPanel(c, ro);
+  fill(body, statusPanel, repoPanel, infoPanel, renderMaintenance(c, ro), renderLog(c));
 }
 
 function renderMaintenance(c, ro) {
@@ -1602,6 +1707,12 @@ function openReport(c) {
       ...howToUse(c).map((x) => [x.label, x.text]),
       !support && d.maintenanceMethod ? ['How to reach us', h('span', { class: 'pre' }, d.maintenanceMethod)] : null,
     ),
+
+    // 云端建站：告诉客户开发者的协作者和 Claude App 还有权限，留不留由客户决定
+    developerAccess(c).length ? [
+      h('h2', null, 'Developer access'),
+      kv(...developerAccess(c).map((x) => [x.label, x.text])),
+    ] : null,
 
     // 售后天数为 0 时不显示 Support，只保留上面“不含维护”的说明
     support ? [
