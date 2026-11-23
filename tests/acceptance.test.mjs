@@ -681,6 +681,10 @@ test('19. 开工包：让云端 Claude 存成 CLAUDE.md，带填好的建站规�
     assert.match(t, /Next\.js/);
     assert.match(t, /21st\.dev/);
     assert.match(t, /UI UX Pro Max/);
+    // 设计 skill 固定版本，复制进客户仓库，不走 npx
+    assert.match(t, /git clone --depth 1 --branch v\d+\.\d+\.\d+ https:\/\/github\.com\/nextlevelbuilder\/ui-ux-pro-max-skill/);
+    assert.match(t, /\.claude\/skills\/ui-ux-pro-max\/LICENSE/);
+    assert.match(t, /python3 \.claude\/skills\/ui-ux-pro-max\/scripts\/search\.py/);
     assert.match(t, /docs\/handoff\.md/);
     assert.match(t, /zi\.example/);
     assert.match(t, /https:\/\/github\.com\/zi-owner\/site/);

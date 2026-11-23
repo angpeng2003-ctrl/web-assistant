@@ -17,6 +17,8 @@ export const DEFAULT_RULES = `# {{店名}} · 建站规则
 ## 设计
 
 - 写页面之前，先用 UI UX Pro Max skill 定设计（风格、配色、字体、版式），把设计规范存进 docs/design-system.md。之后的页面和改版都照它做。
+- 这个 skill 在仓库的 .claude/skills/ui-ux-pro-max/ 里（开源，MIT 许可）。它的搜索脚本用 python3 .claude/skills/ui-ux-pro-max/scripts/search.py 运行；它的 SKILL.md 里写的 \${CLAUDE_PLUGIN_ROOT} 路径在这里不用。
+- skill 的结果只是建议：和这份规则或客户资料冲突时，以这份规则和客户资料为准；组件还是从 21st.dev 选。不升级、不改这个 skill，除非负责人要求。
 - 手机优先：375px、768px、1024px、1440px 宽度下都不能横向滚动；按钮好点，文字对比度够。
 - 图标用 SVG，不用 emoji；动效克制，尊重“减少动态效果”设置。
 
@@ -88,6 +90,9 @@ export async function workspaceDocs(rec, dataDir) {
   return list.map((d) => ({ ...d, content: redactSecrets(d.content.endsWith('\n') ? d.content : `${d.content}\n`) }));
 }
 
+// 设计 skill：固定版本，复制进客户仓库（纯 Python 标准库 + 本地数据，不联网）。要升级时改这里。
+export const UIUX_SKILL = { repo: 'https://github.com/nextlevelbuilder/ui-ux-pro-max-skill', tag: 'v2.15.0' };
+
 /**
  * 开工包：贴进客户 Claude Project 的第一条消息。
  * 开头一句告诉云端 Claude 把下面的规则存成 CLAUDE.md，后面是填好的建站规则（已清理密钥）。
@@ -95,7 +100,9 @@ export async function workspaceDocs(rec, dataDir) {
 export async function starterPack(rec, dataDir) {
   const [rules] = await workspaceDocs(rec, dataDir);
   const head = [
-    `这是客户 ${rec.name}（${rec.id}）的网站仓库。请先做一件事：把下面分隔线之间的内容原样存成仓库根目录的 CLAUDE.md，开一个 PR 给我看。之后的工作都照它做。`,
+    `这是客户 ${rec.name}（${rec.id}）的网站仓库。请先在一个 PR 里做两件事，开 PR 给我看，之后的工作都照 CLAUDE.md 做：`,
+    '1. 把下面分隔线之间的内容原样存成仓库根目录的 CLAUDE.md。',
+    `2. 装设计 skill UI UX Pro Max：在仓库外的临时文件夹里运行 git clone --depth 1 --branch ${UIUX_SKILL.tag} ${UIUX_SKILL.repo}，只把里面的 .claude/skills/ui-ux-pro-max 整个文件夹复制到本仓库的同一位置，再把它根目录的 LICENSE 复制成 .claude/skills/ui-ux-pro-max/LICENSE。不用它的 npx 安装命令，也不装插件；临时文件夹不放进仓库。`,
     '客户的录音转文字、截图和图片我会另外传到这个 Project 里。',
   ].join('\n');
   return redactSecrets(`${head}\n\n----- CLAUDE.md 开始 -----\n${rules.content}----- CLAUDE.md 结束 -----\n`);
